@@ -735,6 +735,11 @@ const PALETTE = ['#7C3AED','#1D4ED8','#D97706','#0D9488','#16A34A','#DC2626','#D
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const GCOLS  = ['May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+// ─── Org instance ────────────────────────────────────────────────────────────
+//   One codebase, multiple separate datasets. ?org=EVO namespaces all local
+//   storage (evo_*) and remembers its own cloud token, fully separate from AAR.
+const ORG = ((new URLSearchParams(location.search).get('org')) || 'AAR').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) || 'AAR';
+const KP  = ORG.toLowerCase() + '_';   // localStorage key prefix, e.g. aar_ / evo_
 const GSTART = new Date('2026-05-01');
 const GEND   = new Date('2026-12-31');
 const GTOTAL = (GEND - GSTART) / 86400000 + 1;
@@ -838,7 +843,7 @@ const DEFAULTS = [
   ]},
 ];
 
-let projects  = JSON.parse(localStorage.getItem('aar_projs') || 'null') || DEFAULTS.map(p=>({...p, phases:[...(p.phases||[])]}));
+let projects  = JSON.parse(localStorage.getItem(KP + 'projs') || 'null') || (ORG === 'AAR' ? DEFAULTS.map(p=>({...p, phases:[...(p.phases||[])]})) : []);
 
 // ── Migration: backfill seFte/taFte on phases that predate those fields ────────
 function migrateProjects() {
@@ -905,7 +910,7 @@ function pushCloud() {
 }
 
 function persist() {
-  localStorage.setItem('aar_projs', JSON.stringify(projects));
+  localStorage.setItem(KP + 'projs', JSON.stringify(projects));
   pushCloud();
 }
 
@@ -2249,16 +2254,16 @@ function applyCloudData(data) {
       workOrders = data.workOrders;
       workOrders.forEach(w => { if (!Array.isArray(w.projects)) w.projects = []; });
       nextWoId = Math.max(0, ...workOrders.map(w => w.id || 0)) + 1;
-      localStorage.setItem('aar_wos', JSON.stringify(workOrders));
+      localStorage.setItem(KP + 'wos', JSON.stringify(workOrders));
     }
     if (data.sizingConfig && typeof data.sizingConfig === 'object') {
       sizingConfig = data.sizingConfig;
-      localStorage.setItem('aar_sizing', JSON.stringify(sizingConfig));
+      localStorage.setItem(KP + 'sizing', JSON.stringify(sizingConfig));
     }
   }
   migrateProjects();
   nextProjId = Math.max(...projects.map(p => p.id), 18) + 1;
-  localStorage.setItem('aar_projs', JSON.stringify(projects));
+  localStorage.setItem(KP + 'projs', JSON.stringify(projects));
 }
 
 /** Fetch + parse cloud data for a config, or throw. */
@@ -2282,11 +2287,11 @@ async function cloudFetch(cfg) {
  *  (with an expired token in the URL) can automatically fall back to it. */
 function storeCloud() {
   if (binId && masterKey && backendType) {
-    try { localStorage.setItem('aar_cloud', JSON.stringify({ type: backendType, id: binId, secret: masterKey })); } catch {}
+    try { localStorage.setItem(KP + 'cloud', JSON.stringify({ type: backendType, id: binId, secret: masterKey })); } catch {}
   }
 }
 function loadStoredCloud() {
-  try { const s = JSON.parse(localStorage.getItem('aar_cloud') || 'null'); return (s && s.id && s.secret) ? s : null; }
+  try { const s = JSON.parse(localStorage.getItem(KP + 'cloud') || 'null'); return (s && s.id && s.secret) ? s : null; }
   catch { return null; }
 }
 
@@ -2354,8 +2359,8 @@ async function setupCloud() {
         'Accept': 'application/vnd.github+json'
       },
       body: JSON.stringify({
-        description: 'AAR Programs of Work — Timeline Manager Data',
-        public: true,
+        description: `${ORG} Programs of Work — Timeline Manager Data`,
+        public: false,
         files: { [GIST_FILE]: { content: JSON.stringify(cloudPayload(), null, 2) } }
       })
     });
@@ -2875,7 +2880,7 @@ function _pptExport(o) {
     if (o.kpiLine) { slide.addText(o.kpiLine, { x: 0.5, y: y, w: 12.3, h: 0.4, fontSize: 12, bold: true, color: '0F2544' }); y += 0.55; }
     if (o.chart) { const iw = 8.4, ih = iw * (o.chart.h / o.chart.w); slide.addImage({ data: o.chart.png, x: 0.5, y: y, w: iw, h: ih }); y += ih + 0.3; }
     if (o.tableRows) slide.addTable(o.tableRows, Object.assign({ x: 0.5, y: y, w: 12.3, fontFace: 'Arial', fontSize: 9, valign: 'middle', align: 'center', border: { type: 'solid', pt: 0.5, color: 'E2E8F0' }, color: '1E293B', autoPage: false }, o.tableOpts || {}));
-    slide.addText('AAR — Resource Utilisation · generated ' + new Date().toLocaleDateString(), { x: 0.5, y: 7.05, w: 12.3, h: 0.3, fontSize: 9, color: '94A3B8' });
+    slide.addText(ORG + ' — Resource Utilisation · generated ' + new Date().toLocaleDateString(), { x: 0.5, y: 7.05, w: 12.3, h: 0.3, fontSize: 9, color: '94A3B8' });
     pptx.writeFile({ fileName: o.fileName || 'AAR_export.pptx' }).catch(() => alert('Could not save the .pptx file.'));
   });
 }
@@ -3162,7 +3167,7 @@ const PHASE_SE_W  = { sd:1.0, dev:1.0, sit:0.4, iqa:0.3, uat:0.2, golive:0.4, pl
 const PHASE_TA_W  = { sd:0.0, dev:0.1, sit:0.8, iqa:0.9, uat:0.9, golive:0.3, planning:0.0, review:0.5, custom:0.5 };
 const PHASE_BA_W  = { sd:1.0, dev:0.3, sit:0.2, iqa:0.2, uat:0.4, golive:0.2, planning:1.0, review:0.6, custom:0.4 };
 
-let sizingConfig = JSON.parse(localStorage.getItem('aar_sizing') || 'null') || {
+let sizingConfig = JSON.parse(localStorage.getItem(KP + 'sizing') || 'null') || {
   increment: 25,   // % added per sub-level: X1 = base×1.25, X2 = base×1.50, X3 = base×1.75
   bases: {
     S: { se: 1,   ta: 0.5, ba: 0.5 },
@@ -3173,7 +3178,7 @@ let sizingConfig = JSON.parse(localStorage.getItem('aar_sizing') || 'null') || {
 };
 // Migration: backfill BA base on sizing configs that predate the BA role
 { const _baDef = { S:0.5, M:1, L:1.5, C:2 }; Object.keys(sizingConfig.bases || {}).forEach(k => { if (sizingConfig.bases[k].ba == null) sizingConfig.bases[k].ba = _baDef[k] != null ? _baDef[k] : 0; }); }
-function saveSizingConfig() { localStorage.setItem('aar_sizing', JSON.stringify(sizingConfig)); pushCloud(); }
+function saveSizingConfig() { localStorage.setItem(KP + 'sizing', JSON.stringify(sizingConfig)); pushCloud(); }
 
 // ════════════════════════════════════════════════════════════════════════════
 //  CAPACITY MODEL — Work Orders (commercial) + Demand-vs-Capacity + Dashboard
@@ -3185,11 +3190,11 @@ const WO_DEFAULTS = [
   { id:2, wo:'WO-2055', area:'Regulatory delivery SOW',    se:4, ta:3, ba:2, pm:1, start:'2026-05', end:'2026-08', projects:[1,2,3,4,5,6] },
   { id:3, wo:'WO-2068', area:'GPS / Non-Reg uplift',       se:3, ta:2, ba:1, pm:1, start:'2026-07', end:'2026-12', projects:[11,14,15,16,17,18] },
 ];
-let workOrders = JSON.parse(localStorage.getItem('aar_wos') || 'null') || WO_DEFAULTS.map(w => ({ ...w, projects:[...w.projects] }));
+let workOrders = JSON.parse(localStorage.getItem(KP + 'wos') || 'null') || (ORG === 'AAR' ? WO_DEFAULTS.map(w => ({ ...w, projects:[...w.projects] })) : []);
 workOrders.forEach(w => { if (!Array.isArray(w.projects)) w.projects = []; if (w.ba == null) w.ba = 0; });
 let nextWoId    = Math.max(0, ...workOrders.map(w => w.id || 0)) + 1;
 let woAllocOpen = null;  // index of WO whose project-allocation panel is open
-function persistWOs() { localStorage.setItem('aar_wos', JSON.stringify(workOrders)); pushCloud(); }
+function persistWOs() { localStorage.setItem(KP + 'wos', JSON.stringify(workOrders)); pushCloud(); }
 
 const fmtN = v => (v % 1 === 0 ? v : (+v).toFixed(1));
 
@@ -3926,7 +3931,7 @@ document.addEventListener('mouseup', () => {
 // ── Internal views toggle — hide Dashboard & Settings for customer demos ─────
 //    Default OFF (hidden). State is per-device (localStorage), so anyone opening
 //    a shared link sees them hidden until they explicitly enable internal mode.
-let internalMode = JSON.parse(localStorage.getItem('aar_internal') || 'false');
+let internalMode = JSON.parse(localStorage.getItem(KP + 'internal') || 'false');
 function applyInternalMode() {
   const d = document.getElementById('tabDashboard');
   const s = document.getElementById('tabSettings');
@@ -3949,7 +3954,7 @@ function applyInternalMode() {
 }
 function toggleInternal() {
   internalMode = !internalMode;
-  localStorage.setItem('aar_internal', JSON.stringify(internalMode));
+  localStorage.setItem(KP + 'internal', JSON.stringify(internalMode));
   applyInternalMode();
 }
 // Hidden keyboard shortcut as a discreet trigger: Ctrl/Cmd + Shift + K
@@ -3958,6 +3963,10 @@ document.addEventListener('keydown', e => {
     e.preventDefault(); toggleInternal();
   }
 });
+// Apply org branding (title + header) — one file serves AAR, EVO, etc. via ?org=
+document.title = ORG + ' Programs of Work — Timeline Manager';
+{ const t = document.querySelector('.hdr-title'); if (t) t.textContent = ORG + ' Programs of Work'; }
+
 applyInternalMode();
 
 initCloud();

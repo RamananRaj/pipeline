@@ -736,10 +736,32 @@ const PALETTE = ['#7C3AED','#1D4ED8','#D97706','#0D9488','#16A34A','#DC2626','#D
 // ─── Constants ────────────────────────────────────────────────────────────────
 const GCOLS  = ['May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 // ─── Org instance ────────────────────────────────────────────────────────────
-//   One codebase, multiple separate datasets. ?org=EVO namespaces all local
-//   storage (evo_*) and remembers its own cloud token, fully separate from AAR.
-const ORG = ((new URLSearchParams(location.search).get('org')) || 'AAR').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) || 'AAR';
-const KP  = ORG.toLowerCase() + '_';   // localStorage key prefix, e.g. aar_ / evo_
+//   One codebase, multiple fully-separate datasets. The org identity rides with
+//   the Gist (its id keys the local cache; its stored `org` field sets the name),
+//   so a shared link is just the plain Gist link — no ?org= to see or guess.
+//   ?org=NAME is only used once, by the owner, to NAME a brand-new instance.
+function _gistIdFromHash() {
+  try { const p = new URLSearchParams(location.hash.slice(1)); return p.get('gist') || p.get('bin') || null; }
+  catch { return null; }
+}
+const _orgParam = ((new URLSearchParams(location.search).get('org')) || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+const _gid = _gistIdFromHash();
+const KP  = _gid ? ('g' + _gid.slice(0, 12) + '_') : ((_orgParam || 'AAR').toLowerCase() + '_');
+let   ORG = _orgParam || 'AAR';   // display name; overwritten by the Gist's `org` on load
+// One-time: inherit legacy per-origin data into a Gist-scoped namespace so
+// existing AAR local data isn't orphaned by the switch (cloud load corrects any
+// mismatch; tokens are NOT copied, so orgs never inherit each other's cloud config).
+if (_gid && localStorage.getItem(KP + 'projs') === null && localStorage.getItem('aar_projs') !== null) {
+  ['projs', 'wos', 'sizing'].forEach(k => {
+    const v = localStorage.getItem('aar_' + k);
+    if (v !== null && localStorage.getItem(KP + k) === null) localStorage.setItem(KP + k, v);
+  });
+}
+function applyBranding() {
+  document.title = ORG + ' Programs of Work — Timeline Manager';
+  const t = document.querySelector('.hdr-title');
+  if (t) t.textContent = ORG + ' Programs of Work';
+}
 const GSTART = new Date('2026-05-01');
 const GEND   = new Date('2026-12-31');
 const GTOTAL = (GEND - GSTART) / 86400000 + 1;
@@ -873,17 +895,38 @@ const expanded = new Set(); // project IDs that are expanded to show phases
  *  v2 = object form (projects + Work Orders + sizing). Older links stored a
  *  bare projects array — still loaded for backward compatibility on read. */
 function cloudPayload() {
-  return { v: 2, projects, workOrders: (typeof workOrders !== 'undefined' ? workOrders : []),
+  return { v: 2, org: ORG, projects, workOrders: (typeof workOrders !== 'undefined' ? workOrders : []),
            sizingConfig: (typeof sizingConfig !== 'undefined' ? sizingConfig : null) };
 }
 
 /** Debounced push of the full payload to the configured cloud backend. */
 function pushCloud() {
   if (!binId || !masterKey) return;
+  cloudDirty = true;
   clearTimeout(cloudTimer);
   setSyncBadge('saving');
   cloudTimer = setTimeout(async () => {
     try {
+      // ── Conflict guard: has someone else saved since we loaded? (gist only) ──
+      if (backendType === 'gist' && lastSyncVersion) {
+        try {
+          const chk = await cloudFetch({ type: 'gist', id: binId, secret: masterKey });
+          if (chk.version && chk.version !== lastSyncVersion) {
+            const loadTheirs = window.confirm(
+              '⚠ Someone else has updated this plan since you opened it.\n\n' +
+              'OK  —  load their latest version (your unsaved changes will be discarded)\n' +
+              'Cancel  —  overwrite it with your version'
+            );
+            if (loadTheirs) {
+              applyCloudData(chk.data); lastSyncVersion = chk.version; cloudDirty = false;
+              renderStats(); render(); refreshActiveViews();
+              setSyncBadge('ready', '✓ Synced (reloaded latest)');
+              return;
+            }
+            // else: fall through and overwrite with our version
+          }
+        } catch {}
+      }
       const content = JSON.stringify(cloudPayload(), null, 2);
       let r;
       if (backendType === 'gist') {
@@ -904,9 +947,23 @@ function pushCloud() {
           body: content
         });
       }
-      setSyncBadge(r.ok ? 'ready' : 'error');
+      if (r.ok) {
+        if (backendType === 'gist') { try { const g = await r.json(); lastSyncVersion = g.history?.[0]?.version || lastSyncVersion; } catch {} }
+        cloudDirty = false;
+        setSyncBadge('ready');
+      } else {
+        setSyncBadge('error');
+      }
     } catch { setSyncBadge('error'); }
   }, 1200);
+}
+/** Re-render whichever secondary view is currently open (after a remote refresh). */
+function refreshActiveViews() {
+  const vis = id => { const el = document.getElementById(id); return el && el.style.display !== 'none'; };
+  if (vis('resView')) renderResView();
+  if (vis('lvView')) renderLvView();
+  if (vis('dashboardView')) renderDashboardView();
+  if (vis('settingsView')) renderSettingsView();
 }
 
 function persist() {
@@ -2205,6 +2262,8 @@ let binId        = null;   // gist ID (or jsonbin bin ID for old links)
 let masterKey    = null;   // GitHub PAT (or jsonbin key for old links)
 let backendType  = null;   // 'gist' | 'jsonbin'
 let cloudTimer   = null;
+let lastSyncVersion = null;   // gist revision we last loaded/saved — for conflict detection
+let cloudDirty      = false;  // true when there are edits not yet confirmed saved
 
 function parseHashConfig() {
   try {
@@ -2249,6 +2308,7 @@ function applyCloudData(data) {
   if (Array.isArray(data)) {
     projects = data;                                  // legacy: projects only
   } else if (data && typeof data === 'object') {
+    if (data.org) { ORG = String(data.org).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) || ORG; applyBranding(); }
     if (Array.isArray(data.projects)) projects = data.projects;
     if (Array.isArray(data.workOrders)) {
       workOrders = data.workOrders;
@@ -2266,7 +2326,7 @@ function applyCloudData(data) {
   localStorage.setItem(KP + 'projs', JSON.stringify(projects));
 }
 
-/** Fetch + parse cloud data for a config, or throw. */
+/** Fetch cloud data for a config, or throw. Returns { data, version }. */
 async function cloudFetch(cfg) {
   if (cfg.type === 'gist') {
     const r = await fetch(`${GITHUB_API}/gists/${cfg.id}`, {
@@ -2275,13 +2335,13 @@ async function cloudFetch(cfg) {
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const gist = await r.json();
     const raw  = gist.files?.[GIST_FILE]?.content;
-    return raw ? JSON.parse(raw) : null;
+    return { data: raw ? JSON.parse(raw) : null, version: gist.history?.[0]?.version || null };
   }
   const r = await fetch(`${JBIN_URL}/${cfg.id}/latest`, {
     headers: { 'X-Master-Key': cfg.secret, 'X-Bin-Meta': 'false' }
   });
   if (!r.ok) throw new Error('HTTP ' + r.status);
-  return (await r.json()).record;
+  return { data: (await r.json()).record, version: null };
 }
 /** Remember the last working cloud config on this device, so a stale bookmark
  *  (with an expired token in the URL) can automatically fall back to it. */
@@ -2311,14 +2371,16 @@ async function initCloud() {
 
   setSyncBadge('loading');
   try {
-    applyCloudData(await cloudFetch(primary));
+    const res = await cloudFetch(primary);
+    applyCloudData(res.data); lastSyncVersion = res.version;
     activate(primary, false);
   } catch (e) {
     console.warn('Cloud load error (primary):', e);
     // The URL token likely expired — fall back to a different remembered config
     if (stored && stored.id && stored.secret && (stored.secret !== primary.secret || stored.id !== primary.id)) {
       try {
-        applyCloudData(await cloudFetch(stored));
+        const res = await cloudFetch(stored);
+        applyCloudData(res.data); lastSyncVersion = res.version;
         activate(stored, true);
       } catch (e2) {
         console.warn('Cloud load error (stored fallback):', e2);
@@ -2372,6 +2434,8 @@ async function setupCloud() {
     }
     const gist = await r.json();
     binId = gist.id; masterKey = token; backendType = 'gist';
+    lastSyncVersion = gist.history?.[0]?.version || null;
+    cloudDirty = false;
     setHashConfig('gist', gist.id, token);
     storeCloud();
     statusEl.style.color = '#16A34A';
@@ -3963,13 +4027,31 @@ document.addEventListener('keydown', e => {
     e.preventDefault(); toggleInternal();
   }
 });
-// Apply org branding (title + header) — one file serves AAR, EVO, etc. via ?org=
-document.title = ORG + ' Programs of Work — Timeline Manager';
-{ const t = document.querySelector('.hdr-title'); if (t) t.textContent = ORG + ' Programs of Work'; }
+// Apply org branding (title + header). Name comes from ?org= for a new instance,
+// or is overwritten by the Gist's stored `org` once cloud data loads.
+applyBranding();
 
 applyInternalMode();
 
 initCloud();
+
+// ── Freshness check: quietly pull teammates' changes when you have none pending ──
+setInterval(async () => {
+  if (!binId || !masterKey || backendType !== 'gist') return;
+  if (cloudDirty || cloudTimer) return;                       // don't disturb unsaved edits
+  if (document.hidden) return;                                // skip when tab not visible
+  if (document.querySelector('.mo.open') || document.querySelector('.mop.open')) return; // not mid-edit-in-modal
+  if (typeof phaseDragState !== 'undefined' && (phaseDragState || projReorderState || phReorderState)) return; // not mid-drag
+  try {
+    const chk = await cloudFetch({ type: 'gist', id: binId, secret: masterKey });
+    if (chk.version && lastSyncVersion && chk.version !== lastSyncVersion) {
+      applyCloudData(chk.data);
+      lastSyncVersion = chk.version;
+      renderStats(); render(); refreshActiveViews();
+      setSyncBadge('ready', '✓ Synced (updated by team)');
+    }
+  } catch {}
+}, 30000);
 </script>
 </body>
 </html>

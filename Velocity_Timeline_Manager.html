@@ -2261,38 +2261,69 @@ function applyCloudData(data) {
   localStorage.setItem('aar_projs', JSON.stringify(projects));
 }
 
+/** Fetch + parse cloud data for a config, or throw. */
+async function cloudFetch(cfg) {
+  if (cfg.type === 'gist') {
+    const r = await fetch(`${GITHUB_API}/gists/${cfg.id}`, {
+      headers: { 'Authorization': `Bearer ${cfg.secret}`, 'Accept': 'application/vnd.github+json' }
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const gist = await r.json();
+    const raw  = gist.files?.[GIST_FILE]?.content;
+    return raw ? JSON.parse(raw) : null;
+  }
+  const r = await fetch(`${JBIN_URL}/${cfg.id}/latest`, {
+    headers: { 'X-Master-Key': cfg.secret, 'X-Bin-Meta': 'false' }
+  });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return (await r.json()).record;
+}
+/** Remember the last working cloud config on this device, so a stale bookmark
+ *  (with an expired token in the URL) can automatically fall back to it. */
+function storeCloud() {
+  if (binId && masterKey && backendType) {
+    try { localStorage.setItem('aar_cloud', JSON.stringify({ type: backendType, id: binId, secret: masterKey })); } catch {}
+  }
+}
+function loadStoredCloud() {
+  try { const s = JSON.parse(localStorage.getItem('aar_cloud') || 'null'); return (s && s.id && s.secret) ? s : null; }
+  catch { return null; }
+}
+
 async function initCloud() {
-  const cfg = parseHashConfig();
-  if (cfg.id && cfg.secret) {
+  const urlCfg  = parseHashConfig();
+  const stored  = loadStoredCloud();
+  const primary = (urlCfg.id && urlCfg.secret) ? urlCfg : stored;
+
+  if (!primary || !primary.id || !primary.secret) { setSyncBadge('local'); renderStats(); render(); return; }
+
+  const activate = (cfg, reconnected) => {
     binId = cfg.id; masterKey = cfg.secret; backendType = cfg.type;
-    setSyncBadge('loading');
-    try {
-      let data;
-      if (cfg.type === 'gist') {
-        const r = await fetch(`${GITHUB_API}/gists/${cfg.id}`, {
-          headers: { 'Authorization': `Bearer ${cfg.secret}`, 'Accept': 'application/vnd.github+json' }
-        });
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        const gist = await r.json();
-        const raw  = gist.files?.[GIST_FILE]?.content;
-        data = raw ? JSON.parse(raw) : null;
-      } else {
-        // Legacy JSONbin support
-        const r = await fetch(`${JBIN_URL}/${cfg.id}/latest`, {
-          headers: { 'X-Master-Key': cfg.secret, 'X-Bin-Meta': 'false' }
-        });
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        const json = await r.json();
-        data = json.record;
+    storeCloud();
+    setHashConfig(cfg.type, cfg.id, cfg.secret);   // keep the URL pointing at the working config
+    setSyncBadge('ready', reconnected ? '✓ Synced (auto-reconnected)' : undefined);
+  };
+
+  setSyncBadge('loading');
+  try {
+    applyCloudData(await cloudFetch(primary));
+    activate(primary, false);
+  } catch (e) {
+    console.warn('Cloud load error (primary):', e);
+    // The URL token likely expired — fall back to a different remembered config
+    if (stored && stored.id && stored.secret && (stored.secret !== primary.secret || stored.id !== primary.id)) {
+      try {
+        applyCloudData(await cloudFetch(stored));
+        activate(stored, true);
+      } catch (e2) {
+        console.warn('Cloud load error (stored fallback):', e2);
+        binId = primary.id; masterKey = primary.secret; backendType = primary.type;
+        setSyncBadge('error', '⚠ Load failed — using local data');
       }
-      applyCloudData(data);
-      setSyncBadge('ready');
-    } catch (e) {
+    } else {
+      binId = primary.id; masterKey = primary.secret; backendType = primary.type;
       setSyncBadge('error', '⚠ Load failed — using local data');
-      console.warn('Cloud load error:', e);
     }
-  } else {
-    setSyncBadge('local');
   }
   renderStats();
   render();
@@ -2337,6 +2368,7 @@ async function setupCloud() {
     const gist = await r.json();
     binId = gist.id; masterKey = token; backendType = 'gist';
     setHashConfig('gist', gist.id, token);
+    storeCloud();
     statusEl.style.color = '#16A34A';
     statusEl.textContent = '✓ GitHub Gist created — your data is live!';
     setSyncBadge('ready');

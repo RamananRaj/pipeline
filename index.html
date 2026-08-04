@@ -734,7 +734,6 @@ const PT = {
 const PALETTE = ['#7C3AED','#1D4ED8','#D97706','#0D9488','#16A34A','#DC2626','#DB2777','#0369A1','#64748B','#F59E0B'];
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const GCOLS  = ['May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 // ─── Org instance ────────────────────────────────────────────────────────────
 //   One codebase, multiple fully-separate datasets. The org identity rides with
 //   the Gist (its id keys the local cache; its stored `org` field sets the name),
@@ -762,9 +761,29 @@ function applyBranding() {
   const t = document.querySelector('.hdr-title');
   if (t) t.textContent = ORG + ' Programs of Work';
 }
-const GSTART = new Date('2026-05-01');
-const GEND   = new Date('2026-12-31');
-const GTOTAL = (GEND - GSTART) / 86400000 + 1;
+// ─── Timeline window (configurable per instance, set in Settings) ────────────
+const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const DEFAULT_HORIZON = { year: 2026, month: 4, count: 8 };   // May 2026, 8 months
+let HORIZON = (function () {
+  try { const s = JSON.parse(localStorage.getItem(KP + 'horizon') || 'null');
+        if (s && s.count > 0 && s.year && s.month != null) return { year: +s.year, month: +s.month, count: Math.min(60, +s.count) }; } catch {}
+  return { ...DEFAULT_HORIZON };
+})();
+let GMONTHS = [], GCOLS = [], GSTART, GEND, GTOTAL;
+function rebuildHorizon() {
+  GMONTHS = []; let y = HORIZON.year, m = HORIZON.month;
+  for (let i = 0; i < HORIZON.count; i++) { GMONTHS.push({ y, m }); if (++m > 11) { m = 0; y++; } }
+  const multiYear = GMONTHS.length && GMONTHS[0].y !== GMONTHS[GMONTHS.length - 1].y;
+  GMONTHS.forEach((g, i) => { g.label = MONTH_NAMES[g.m] + ((multiYear && (g.m === 0 || i === 0)) ? " '" + String(g.y).slice(2) : ''); });
+  GCOLS  = GMONTHS.map(g => g.label);
+  const last = GMONTHS[GMONTHS.length - 1];
+  GSTART = new Date(Date.UTC(GMONTHS[0].y, GMONTHS[0].m, 1));
+  GEND   = new Date(Date.UTC(last.y, last.m + 1, 0));
+  GTOTAL = (GEND - GSTART) / 86400000 + 1;
+}
+rebuildHorizon();
+function saveHorizon() { localStorage.setItem(KP + 'horizon', JSON.stringify(HORIZON)); if (typeof pushCloud === 'function') pushCloud(); }
+function applyHorizon() { rebuildHorizon(); renderStats(); render(); if (typeof refreshActiveViews === 'function') refreshActiveViews(); }
 const TODAY  = new Date().toISOString().slice(0, 10); // dynamic — always reflects real today
 const SCOL = { reg:'#DC2626', nonreg:'#7C3AED', gps:'#1D4ED8', bau:'#0369A1', standalone:'#EA580C' };
 const SLBL = { reg:'Regulatory', nonreg:'Non-Reg', gps:'GPS', bau:'BAU', standalone:'Standalone' };
@@ -895,7 +914,7 @@ const expanded = new Set(); // project IDs that are expanded to show phases
  *  v2 = object form (projects + Work Orders + sizing). Older links stored a
  *  bare projects array — still loaded for backward compatibility on read. */
 function cloudPayload() {
-  return { v: 2, org: ORG, projects, workOrders: (typeof workOrders !== 'undefined' ? workOrders : []),
+  return { v: 2, org: ORG, horizon: HORIZON, projects, workOrders: (typeof workOrders !== 'undefined' ? workOrders : []),
            sizingConfig: (typeof sizingConfig !== 'undefined' ? sizingConfig : null) };
 }
 
@@ -1672,9 +1691,9 @@ function selectResMonth(idx) {
  *  dragging a phase bar immediately updates Combined / Reg / Non-Reg levelling.
  *  Falls back to project-level start/end for projects without dated phases. */
 function getMonthProjects(mIdx) {
-  const year = 2026, month = 4 + mIdx;            // Jan=0, May=4
-  const ms = new Date(year, month, 1);
-  const me = new Date(year, month + 1, 0);         // last day of month
+  const gm = GMONTHS[mIdx];
+  const ms = new Date(gm.y, gm.m, 1);
+  const me = new Date(gm.y, gm.m + 1, 0);          // last day of month
   return projects.filter(p => {
     if ((p.resources || 0) === 0) return false;
     // Prefer phase-level overlap so phase drags update levelling in real time
@@ -2309,6 +2328,11 @@ function applyCloudData(data) {
     projects = data;                                  // legacy: projects only
   } else if (data && typeof data === 'object') {
     if (data.org) { ORG = String(data.org).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) || ORG; applyBranding(); }
+    if (data.horizon && data.horizon.count > 0) {
+      HORIZON = { year: +data.horizon.year, month: +data.horizon.month, count: Math.min(60, +data.horizon.count) };
+      localStorage.setItem(KP + 'horizon', JSON.stringify(HORIZON));
+      rebuildHorizon();
+    }
     if (Array.isArray(data.projects)) projects = data.projects;
     if (Array.isArray(data.workOrders)) {
       workOrders = data.workOrders;
@@ -2471,9 +2495,9 @@ function shiftDate(dateStr, days) {
 // ─── Per-project, per-month SE & TA demand (computed from phase seFte/taFte) ──
 function computePhaseDemand() {
   return GCOLS.map((mo, mi) => {
-    const year = 2026, month = 4 + mi;           // May=4 (0-indexed)
-    const ms = new Date(year, month, 1);
-    const me = new Date(year, month + 1, 0);     // last day of month
+    const gm = GMONTHS[mi];
+    const ms = new Date(gm.y, gm.m, 1);
+    const me = new Date(gm.y, gm.m + 1, 0);      // last day of month
 
     const byProject = projects.map(p => {
       let se = 0, ta = 0, ba = 0;
@@ -3264,8 +3288,8 @@ const fmtN = v => (v % 1 === 0 ? v : (+v).toFixed(1));
 
 /** Is a Work Order active during GCOLS month index mi (0=May…7=Dec)? */
 function woActiveInMonth(wo, mi) {
-  const y = 2026, mo = 4 + mi;
-  const ms = new Date(y, mo, 1), me = new Date(y, mo + 1, 0);
+  const gm = GMONTHS[mi];
+  const ms = new Date(gm.y, gm.m, 1), me = new Date(gm.y, gm.m + 1, 0);
   const s = wo.start ? new Date(wo.start + '-01') : GSTART;
   const eRaw = wo.end ? new Date(wo.end + '-01') : GEND;
   const e = new Date(eRaw.getFullYear(), eRaw.getMonth() + 1, 0); // end-of-month inclusive
@@ -3718,11 +3742,32 @@ function renderSettingsView() {
       </div>
     </div>`;
 
+  // ── Timeline window (per-account span) ────────────────────────────────────
+  const _hMonthOpts = MONTH_NAMES.map((n, i) => `<option value="${i}" ${i === HORIZON.month ? 'selected' : ''}>${n}</option>`).join('');
+  let _eY = HORIZON.year, _eM = HORIZON.month + HORIZON.count - 1; _eY += Math.floor(_eM / 12); _eM = ((_eM % 12) + 12) % 12;
+  const horizonCard = `
+    <div class="res-card">
+      <div class="res-card-title">🗓 Timeline window
+        <span class="res-hint">Start month and how many months this account's timeline spans (each account is independent)</span>
+      </div>
+      <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end">
+        <div><div style="font-size:11px;font-weight:700;color:#64748B;margin-bottom:5px">Start month</div>
+          <select onchange="HORIZON.month=+this.value;saveHorizon();applyHorizon()" style="${inp};width:110px">${_hMonthOpts}</select></div>
+        <div><div style="font-size:11px;font-weight:700;color:#64748B;margin-bottom:5px">Start year</div>
+          <input type="number" min="2020" max="2035" value="${HORIZON.year}" onchange="HORIZON.year=+this.value;saveHorizon();applyHorizon()" style="${numInp};width:76px"></div>
+        <div><div style="font-size:11px;font-weight:700;color:#64748B;margin-bottom:5px"># of months</div>
+          <input type="number" min="1" max="60" value="${HORIZON.count}" onchange="HORIZON.count=Math.max(1,Math.min(60,+this.value||1));saveHorizon();applyHorizon()" style="${numInp};width:66px"></div>
+        <div style="font-size:12px;color:#0F2544;font-weight:700;padding-bottom:7px">→ ${MONTH_NAMES[HORIZON.month]} ${HORIZON.year} – ${MONTH_NAMES[_eM]} ${_eY}</div>
+      </div>
+    </div>`;
+
   document.getElementById('settingsView').innerHTML = `
     <div style="margin-bottom:16px">
       <div style="font-size:18px;font-weight:800;color:#0F2544">Settings</div>
-      <div style="font-size:12px;color:#64748B">Commercial capacity and sizing assumptions that feed Demand vs Capacity and the Dashboard</div>
+      <div style="font-size:12px;color:#64748B">Timeline window, commercial capacity and sizing assumptions for this account</div>
     </div>
+
+    ${horizonCard}
 
     <div class="res-card">
       <div class="res-card-title">💼 Commercial capacity — Work Orders

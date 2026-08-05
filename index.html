@@ -1454,10 +1454,21 @@ function openModal(id) {
     del.style.display = 'none';
     document.getElementById('phaseChipList').innerHTML = '';
   }
+  setModalDateBounds();
   document.getElementById('mo').classList.add('open');
   setTimeout(()=>document.getElementById('moName').focus(),80);
 }
 function closeModal(mid) { document.getElementById(mid).classList.remove('open'); }
+
+/** Constrain the modal date pickers to the current timeline window. */
+function setModalDateBounds() {
+  const lo = GSTART.toISOString().slice(0, 10);
+  const hi = GEND.toISOString().slice(0, 10);
+  ['moStart', 'moEnd', 'mopStart', 'mopEnd', 'mopAStart', 'mopAEnd'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.min = lo; el.max = hi; }
+  });
+}
 function bgClose(e, mid) { if (e.target===document.getElementById(mid)) closeModal(mid); }
 
 function saveProj() {
@@ -1538,6 +1549,7 @@ function openPhaseModal(projId, phaseId) {
     renderColorPicker(PT['dev'].color);
     del.style.display = 'none';
   }
+  setModalDateBounds();
   document.getElementById('mop').classList.add('open');
 }
 

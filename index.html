@@ -780,6 +780,10 @@ function rebuildHorizon() {
   GSTART = new Date(Date.UTC(GMONTHS[0].y, GMONTHS[0].m, 1));
   GEND   = new Date(Date.UTC(last.y, last.m + 1, 0));
   GTOTAL = (GEND - GSTART) / 86400000 + 1;
+  const sub = document.querySelector('.hdr-sub');
+  if (sub) { const f = GMONTHS[0], l = GMONTHS[GMONTHS.length - 1]; sub.textContent = 'Timeline & Resource Manager · ' + MONTH_NAMES[f.m] + ' ' + f.y + ' – ' + MONTH_NAMES[l.m] + ' ' + l.y; }
+  const zl = document.getElementById('ganttZoomLbl');
+  if (zl) { const f = GMONTHS[0], l = GMONTHS[GMONTHS.length - 1]; zl.textContent = MONTH_NAMES[f.m] + ' ' + f.y + ' – ' + MONTH_NAMES[l.m] + ' ' + l.y + ' · drag timeline to pan'; }
 }
 rebuildHorizon();
 function saveHorizon() { localStorage.setItem(KP + 'horizon', JSON.stringify(HORIZON)); if (typeof pushCloud === 'function') pushCloud(); }

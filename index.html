@@ -4126,12 +4126,13 @@ function renderResourcingView() {
 
   const activeCount = rows.filter(r => r.active !== false).length;
   const resList = rows.length ? rows.slice(0, 300).map((r, i) => {
-    let rf = 0, ra = 0; T.mk.forEach(mo => { if (!resActiveInMonth(r, mo.key)) return; rf += +((r.forecast || {})[mo.key] || 0); ra += +((r.actual || {})[mo.key] || 0); });
+    let rf = 0, ra = 0, rot = 0; T.mk.forEach(mo => { if (!resActiveInMonth(r, mo.key)) return; rf += +((r.forecast || {})[mo.key] || 0); ra += +((r.actual || {})[mo.key] || 0); rot += +((r.overtime || {})[mo.key] || 0); });
+    const otCell = rot > 0 ? `<span title="Logged over 37.5 h/week" style="color:#B45309;font-weight:700">⚑ ${fmt(rot)}</span>` : `<span style="color:#CBD5E1">—</span>`;
     const off = r.active === false;
     const eff = off ? (r.inactiveFrom ? ' · from ' + String(r.inactiveFrom).slice(0, 7).replace('-', '/') : '') : (r.activeFrom ? ' · from ' + String(r.activeFrom).slice(0, 7).replace('-', '/') : '');
     const badge = `<button onclick="resToggleActive(${i})" title="Click to change status (asks for an effective date)" style="cursor:pointer;border:none;font-size:10px;font-weight:700;padding:3px 10px;border-radius:11px;${off ? 'background:#F1F5F9;color:#94A3B8' : 'background:#DCFCE7;color:#15803D'}">${off ? 'Inactive' : 'Active'}${eff}</button>`;
-    return `<tr style="${off ? 'opacity:.5' : ''}"><td style="font-weight:500">${r.name || '—'}</td><td style="color:#64748B">${r.role || ''}</td><td>${r.domain || ''}</td><td style="color:#64748B">${r.release || ''}</td><td style="text-align:right">${fmt(rf)}</td><td style="text-align:right;font-weight:600">${fmt(ra)}</td><td style="text-align:center">${badge}</td><td style="text-align:center"><button onclick="resDeleteRow(${i})" title="Remove" style="border:none;background:none;color:#CBD5E1;cursor:pointer;font-size:16px;line-height:1" onmouseover="this.style.color='#DC2626'" onmouseout="this.style.color='#CBD5E1'">×</button></td></tr>`;
-  }).join('') : `<tr><td colspan="8" style="text-align:center;color:#94A3B8;padding:18px">No resources yet — <strong>Import forecast</strong> or <strong>Add resource</strong>.</td></tr>`;
+    return `<tr style="${off ? 'opacity:.5' : ''}"><td style="font-weight:500">${r.name || '—'}</td><td style="color:#64748B">${r.role || ''}</td><td>${r.domain || ''}</td><td style="color:#64748B">${r.release || ''}</td><td style="text-align:right">${fmt(rf)}</td><td style="text-align:right;font-weight:600">${fmt(ra)}</td><td style="text-align:right">${otCell}</td><td style="text-align:center">${badge}</td><td style="text-align:center"><button onclick="resDeleteRow(${i})" title="Remove" style="border:none;background:none;color:#CBD5E1;cursor:pointer;font-size:16px;line-height:1" onmouseover="this.style.color='#DC2626'" onmouseout="this.style.color='#CBD5E1'">×</button></td></tr>`;
+  }).join('') : `<tr><td colspan="9" style="text-align:center;color:#94A3B8;padding:18px">No resources yet — <strong>Import forecast</strong> or <strong>Add resource</strong>.</td></tr>`;
 
   document.getElementById('resourcingView').innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px">
@@ -4155,7 +4156,7 @@ function renderResourcingView() {
     <div class="res-card" style="border-radius:14px"><div class="res-card-title">By domain — elapsed period</div>
       <table class="dtable"><thead><tr><th>Domain</th><th style="text-align:right">Forecast</th><th style="text-align:right">Actual</th><th style="text-align:right">Variance</th><th style="text-align:right">Full FC</th></tr></thead><tbody>${domRows}</tbody></table></div>
     <div class="res-card" style="border-radius:14px"><div class="res-card-title">Resources <span class="res-hint">imported or added manually</span></div>
-      <table class="dtable"><thead><tr><th>Name</th><th>Role</th><th>Domain</th><th>Release</th><th style="text-align:right">FC md</th><th style="text-align:right">Act md</th><th style="text-align:center">Status</th><th></th></tr></thead><tbody>${resList}</tbody></table></div>`;
+      <table class="dtable"><thead><tr><th>Name</th><th>Role</th><th>Domain</th><th>Release</th><th style="text-align:right">FC md</th><th style="text-align:right">Act md</th><th style="text-align:right">OT</th><th style="text-align:center">Status</th><th></th></tr></thead><tbody>${resList}</tbody></table></div>`;
 }
 function resToggleActive(i) {
   const r = resourcing.rows[i]; if (!r) return;
@@ -4177,7 +4178,8 @@ function resAddRow() {
   const name = prompt('Resource name:'); if (!name) return;
   const domain = prompt('Domain (e.g. Billing, Payment, MDM):') || '';
   const role = prompt('Role (optional):') || '';
-  resourcing.rows.push({ id: Date.now(), name: name.trim(), role: role.trim(), domain: domain.trim(), location: '', release: '', forecast: {}, actual: {} });
+  const start = prompt('Effective start date in the programme (YYYY-MM-DD) — man-days count from this month:') || '';
+  resourcing.rows.push({ id: Date.now(), name: name.trim(), role: role.trim(), domain: domain.trim(), location: '', release: '', activeFrom: start.trim(), forecast: {}, actual: {} });
   persistResourcing(); renderResourcingView();
 }
 function ensureXlsx(cb) {
@@ -4215,11 +4217,16 @@ function _resMapImport(arr, mode) {
   const iDom = find(['domain']);
   const iLoc = find(['location']);
   const iPhase = find(['phase', 'release']);
-  const mcols = [];
-  arr[0].forEach((raw, i) => { if (raw instanceof Date) mcols.push([i, raw.getFullYear() + '-' + String(raw.getMonth() + 1).padStart(2, '0')]); });
-  if (iName < 0 || !mcols.length) { alert('Could not find a Name column and dated month columns.\nExpected headers like "Person Name" plus month date columns (e.g. 2026-06-01).'); return; }
+  const dcols = [];
+  arr[0].forEach((raw, i) => { if (raw instanceof Date) dcols.push([i, raw]); });
+  if (iName < 0 || !dcols.length) { alert('Could not find a Name column and dated columns.\nExpected a "Person Name" column plus dated columns — monthly (forecast man-days) or weekly (actual hours).'); return; }
+  const monthOf = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+  const uniqMonths = new Set(dcols.map(([, d]) => monthOf(d)));
+  const weekly = dcols.length > uniqMonths.size;   // more dated columns than months ⇒ weekly grain (hours per week)
+  const HRS_PER_DAY = 7.5;                          // 5-day week; weekly hours ÷ this = man-days
+  const WEEK_CAP = 37.5;                            // normal weekly capacity; hours above this are overtime
   const field = mode === 'actual' ? 'actual' : 'forecast';
-  let n = 0;
+  let n = 0, otAny = false;
   for (let r = 1; r < arr.length; r++) {
     const row = arr[r]; if (!row) continue;
     const nm = row[iName]; if (nm == null || String(nm).trim() === '') continue;
@@ -4227,11 +4234,19 @@ function _resMapImport(arr, mode) {
     let rec = resourcing.rows.find(x => x.name === String(nm) && (x.domain || '') === dom && (x.release || '') === (iPhase >= 0 ? String(row[iPhase] || '') : (x.release || '')));
     if (!rec) { rec = { id: Date.now() + r, name: String(nm), role: iRole >= 0 ? String(row[iRole] || '') : '', domain: dom, location: iLoc >= 0 ? String(row[iLoc] || '') : '', release: iPhase >= 0 ? String(row[iPhase] || '') : '', forecast: {}, actual: {} }; resourcing.rows.push(rec); }
     rec[field] = rec[field] || {};
-    mcols.forEach(([ci, key]) => { const v = row[ci]; const num = typeof v === 'number' ? v : parseFloat(v); if (!isNaN(num)) rec[field][key] = num; });
+    const acc = {}, accOT = {};   // sum by month; weekly cells are capped at 37.5h, excess → overtime
+    dcols.forEach(([ci, d]) => {
+      const v = row[ci]; const num = typeof v === 'number' ? v : parseFloat(v); if (isNaN(num)) return;
+      const k = monthOf(d);
+      if (weekly) { acc[k] = (acc[k] || 0) + Math.min(num, WEEK_CAP); const ot = Math.max(0, num - WEEK_CAP); if (ot > 0) { accOT[k] = (accOT[k] || 0) + ot; otAny = true; } }
+      else { acc[k] = (acc[k] || 0) + num; }
+    });
+    Object.keys(acc).forEach(k => { rec[field][k] = weekly ? +(acc[k] / HRS_PER_DAY).toFixed(2) : acc[k]; });
+    if (weekly && field === 'actual') { rec.overtime = rec.overtime || {}; Object.keys(accOT).forEach(k => { rec.overtime[k] = +(accOT[k] / HRS_PER_DAY).toFixed(2); }); }
     n++;
   }
   persistResourcing(); renderResourcingView();
-  alert('Imported ' + n + ' rows into "' + field + '".');
+  alert('Imported ' + n + ' rows into "' + field + '"' + (weekly ? ' — weekly hours rolled up to man-days (37.5 h/week = 5 days).' + (otAny ? ' Hours over 37.5/week captured separately as overtime.' : '') : '.'));
 }
 
 function applyInternalMode() {

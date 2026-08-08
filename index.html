@@ -4087,6 +4087,39 @@ function resActiveInMonth(r, key) {
   if (r.inactiveFrom && key >= String(r.inactiveFrom).slice(0, 7)) return false;
   return true;
 }
+/** Weekly buckets (Mondays / week-commencing) across the horizon, tagged by their month. */
+function resWeeks() {
+  const out = [];
+  GMONTHS.forEach(g => {
+    const d = new Date(g.y, g.m, 1);
+    const dow = (d.getDay() + 6) % 7;            // 0 = Monday
+    if (dow !== 0) d.setDate(d.getDate() + (7 - dow));
+    while (d.getMonth() === g.m && d.getFullYear() === g.y) {
+      const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      out.push({ key, monthKey: g.y + '-' + String(g.m + 1).padStart(2, '0'), label: (d.getMonth() + 1) + '/' + d.getDate() });
+      d.setDate(d.getDate() + 7);
+    }
+  });
+  return out;
+}
+/** When a month has weekly forecast entries, its monthly man-days derive from them (37.5 h/wk = 5 days). */
+function resRecalcMonthFromWeeks(r, monthKey) {
+  const wks = resWeeks().filter(w => w.monthKey === monthKey);
+  let anyEntry = false, sum = 0;
+  wks.forEach(w => { const h = (r.forecastWk || {})[w.key]; if (h != null && h !== '') { anyEntry = true; sum += (+h || 0); } });
+  if (anyEntry) { r.forecast = r.forecast || {}; r.forecast[monthKey] = +(sum / 7.5).toFixed(2); }
+}
+let resExpanded = new Set();
+function resToggleExpand(id) { if (resExpanded.has(id)) resExpanded.delete(id); else resExpanded.add(id); renderResourcingView(); }
+function resSetWeek(id, wk, val) {
+  const r = (resourcing.rows || []).find(x => x.id === id); if (!r) return;
+  r.forecastWk = r.forecastWk || {};
+  const t = String(val).trim();
+  if (t === '') delete r.forecastWk[wk]; else { const n = parseFloat(t); if (!isNaN(n)) r.forecastWk[wk] = n; }
+  const wobj = resWeeks().find(w => w.key === wk);
+  if (wobj) resRecalcMonthFromWeeks(r, wobj.monthKey);
+  persistResourcing(); renderResourcingView();
+}
 function resTotals() {
   const mk = resMonths();
   const nowKey = new Date().toISOString().slice(0, 7);
@@ -4138,7 +4171,25 @@ function renderResourcingView() {
     const off = r.active === false;
     const eff = off ? (r.inactiveFrom ? ' · from ' + String(r.inactiveFrom).slice(0, 7).replace('-', '/') : '') : (r.activeFrom ? ' · from ' + String(r.activeFrom).slice(0, 7).replace('-', '/') : '');
     const badge = `<button onclick="resToggleActive(${i})" title="Click to change status (asks for an effective date)" style="cursor:pointer;border:none;font-size:10px;font-weight:700;padding:3px 10px;border-radius:11px;${off ? 'background:#F1F5F9;color:#94A3B8' : 'background:#DCFCE7;color:#15803D'}">${off ? 'Inactive' : 'Active'}${eff}</button>`;
-    return `<tr style="${off ? 'opacity:.5' : ''}"><td style="font-weight:500">${r.name || '—'}</td><td style="color:#64748B">${r.role || ''}</td><td>${r.domain || ''}</td><td style="color:#64748B">${r.release || ''}</td><td style="text-align:right">${fmt(rf)}</td><td style="text-align:right;font-weight:600">${fmt(ra)}</td><td style="text-align:right">${etcCell}</td><td style="text-align:right">${otCell}</td><td style="text-align:center">${badge}</td><td style="text-align:center"><button onclick="resDeleteRow(${i})" title="Remove" style="border:none;background:none;color:#CBD5E1;cursor:pointer;font-size:16px;line-height:1" onmouseover="this.style.color='#DC2626'" onmouseout="this.style.color='#CBD5E1'">×</button></td></tr>`;
+    const open = resExpanded.has(r.id);
+    const caret = `<span onclick="resToggleExpand(${r.id})" title="Weekly forecast entry" style="cursor:pointer;color:#94A3B8;margin-right:7px;font-size:11px;user-select:none">${open ? '▾' : '▸'}</span>`;
+    const mainRow = `<tr style="${off ? 'opacity:.5' : ''}"><td style="font-weight:500">${caret}${r.name || '—'}</td><td style="color:#64748B">${r.role || ''}</td><td>${r.domain || ''}</td><td style="color:#64748B">${r.release || ''}</td><td style="text-align:right">${fmt(rf)}</td><td style="text-align:right;font-weight:600">${fmt(ra)}</td><td style="text-align:right">${etcCell}</td><td style="text-align:right">${otCell}</td><td style="text-align:center">${badge}</td><td style="text-align:center"><button onclick="resDeleteRow(${i})" title="Remove" style="border:none;background:none;color:#CBD5E1;cursor:pointer;font-size:16px;line-height:1" onmouseover="this.style.color='#DC2626'" onmouseout="this.style.color='#CBD5E1'">×</button></td></tr>`;
+    let detail = '';
+    if (open) {
+      const WK = resWeeks(), byMo = {};
+      WK.forEach(w => { (byMo[w.monthKey] = byMo[w.monthKey] || []).push(w); });
+      const blocks = T.mk.map(mo => {
+        const wks = byMo[mo.key] || []; if (!wks.length) return '';
+        const inputs = wks.map(w => {
+          const val = (r.forecastWk || {})[w.key];
+          return `<label style="display:flex;flex-direction:column;align-items:center;gap:2px;font-size:9px;color:#94A3B8">${w.label}<input type="number" min="0" step="0.5" value="${val != null ? val : ''}" onchange="resSetWeek(${r.id},'${w.key}',this.value)" style="width:46px;padding:3px;border:1px solid #E2E8F0;border-radius:5px;font-size:11px;text-align:center" placeholder="h"></label>`;
+        }).join('');
+        const md = +((r.forecast || {})[mo.key] || 0);
+        return `<div style="border:1px solid #E2E8F0;border-radius:8px;padding:8px 9px;background:#fff"><div style="font-size:10px;font-weight:700;color:#0F2544;margin-bottom:6px">${mo.label} · <span style="color:#2563EB">${fmt(md)} md</span></div><div style="display:flex;gap:6px;flex-wrap:wrap">${inputs}</div></div>`;
+      }).join('');
+      detail = `<tr><td colspan="10" style="background:#F8FAFC;padding:12px 16px"><div style="font-size:11px;color:#64748B;margin-bottom:9px">✎ Weekly forecast — enter hours per week (W/C Mon); each month totals to man-days at 37.5 h/week. Months left blank keep their imported figure.</div><div style="display:flex;gap:12px;flex-wrap:wrap">${blocks}</div></td></tr>`;
+    }
+    return mainRow + detail;
   }).join('') : `<tr><td colspan="10" style="text-align:center;color:#94A3B8;padding:18px">No resources yet — <strong>Import forecast</strong> or <strong>Add resource</strong>.</td></tr>`;
 
   document.getElementById('resourcingView').innerHTML = `

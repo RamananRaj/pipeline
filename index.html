@@ -4805,6 +4805,7 @@ function rmDragStart(e) {
   const { b } = rmFindBar(sid, gid, lid, bid); if (!b) return;
   rmDrag = { mode, bar, trackW: track.getBoundingClientRect().width, startX: e.clientX, startY: e.clientY, os: b.start, oe: b.end, sid, gid, lid, bid, moved: false, cur: { ns: b.start, ne: b.end }, hoverTrk: null, dropLane: null };
   const tip = document.createElement('div'); tip.style.cssText = 'position:fixed;z-index:100001;background:#0F2544;color:#fff;font-size:10px;font-weight:700;padding:3px 7px;border-radius:5px;pointer-events:none;display:none;white-space:nowrap'; document.body.appendChild(tip); rmDrag.tip = tip;
+  if (mode === 'move') { const ghost = document.createElement('div'); ghost.style.cssText = 'position:fixed;z-index:100002;pointer-events:none;height:16px;border-radius:3px;color:#fff;font-size:9px;font-weight:700;line-height:16px;padding:0 7px;white-space:nowrap;opacity:.9;box-shadow:0 4px 14px rgba(15,37,68,.35);display:none;background:' + (b.color || rmCatColor(b.cat)); ghost.textContent = b.label || ''; document.body.appendChild(ghost); rmDrag.ghost = ghost; }
   bar.style.cursor = mode === 'move' ? 'grabbing' : 'col-resize';
   e.preventDefault();
 }
@@ -4827,8 +4828,9 @@ function rmDragMove(e) {
   rmDrag.cur = { ns, ne };
   const l = rmPct(ns), w = Math.max(0.6, rmPct(ne) - rmPct(ns));
   rmDrag.bar.style.left = l + '%'; rmDrag.bar.style.width = w + '%';
-  if (rmDrag.tip) { const txt = rmDrag.mode === 'l' ? ('Start ' + rmFmtDate(ns)) : rmDrag.mode === 'r' ? ('End ' + rmFmtDate(ne)) : (rmFmtDate(ns) + '  →  ' + rmFmtDate(ne)); rmDrag.tip.textContent = txt; rmDrag.tip.style.left = (e.clientX + 14) + 'px'; rmDrag.tip.style.top = (e.clientY - 8) + 'px'; rmDrag.tip.style.display = 'block'; }
+  if (rmDrag.tip) { const txt = rmDrag.mode === 'l' ? ('Start ' + rmFmtDate(ns)) : rmDrag.mode === 'r' ? ('End ' + rmFmtDate(ne)) : (rmFmtDate(ns) + '  →  ' + rmFmtDate(ne)); rmDrag.tip.textContent = txt; rmDrag.tip.style.left = (e.clientX + 14) + 'px'; rmDrag.tip.style.top = (e.clientY - 28) + 'px'; rmDrag.tip.style.display = 'block'; }
   if (rmDrag.mode === 'move') {   // detect a different lane under the cursor → highlight as drop target
+    if (rmDrag.ghost) { rmDrag.ghost.style.left = (e.clientX + 12) + 'px'; rmDrag.ghost.style.top = (e.clientY + 10) + 'px'; rmDrag.ghost.style.display = 'block'; }
     rmDrag.bar.style.pointerEvents = 'none';
     const under = document.elementFromPoint(e.clientX, e.clientY);
     rmDrag.bar.style.pointerEvents = '';
@@ -4842,6 +4844,7 @@ function rmDragEnd() {
   if (!rmDrag) return;
   const d = rmDrag; rmDrag = null;
   if (d.tip) d.tip.remove();
+  if (d.ghost) d.ghost.remove();
   if (d.hoverTrk) d.hoverTrk.style.boxShadow = '';
   if (d.moved && d.dropLane && d.dropLane.lid !== d.lid) {   // dropped on another lane → reassign
     const src = rmFindBar(d.sid, d.gid, d.lid, d.bid);

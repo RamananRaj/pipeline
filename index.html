@@ -4087,6 +4087,7 @@ function resTotals() {
   let fTot = 0, aTot = 0, fEl = 0, aEl = 0;
   const byDom = {};
   (resourcing.rows || []).forEach(r => {
+    if (r.active === false) return;                 // inactive resources excluded from totals
     mk.forEach(mo => {
       const f = +((r.forecast || {})[mo.key] || 0), a = +((r.actual || {})[mo.key] || 0);
       fTot += f; aTot += a;
@@ -4117,10 +4118,13 @@ function renderResourcingView() {
     return `<tr><td style="font-weight:600">${d}</td><td style="text-align:right;color:#64748B">${fmt(v.fe)}</td><td style="text-align:right;font-weight:700">${fmt(v.ae)}</td><td style="text-align:right;color:${col}">${dv > 0 ? '+' : ''}${Math.round(dv)} (${dp > 0 ? '+' : ''}${dp.toFixed(0)}%)</td><td style="text-align:right;color:#94A3B8">${fmt(v.f)}</td></tr>`;
   }).join('') || `<tr><td colspan="5" style="text-align:center;color:#94A3B8;padding:14px">No forecast yet.</td></tr>`;
 
+  const activeCount = rows.filter(r => r.active !== false).length;
   const resList = rows.length ? rows.slice(0, 300).map((r, i) => {
     let rf = 0, ra = 0; T.mk.forEach(mo => { rf += +((r.forecast || {})[mo.key] || 0); ra += +((r.actual || {})[mo.key] || 0); });
-    return `<tr><td style="font-weight:500">${r.name || '—'}</td><td style="color:#64748B">${r.role || ''}</td><td>${r.domain || ''}</td><td style="color:#64748B">${r.release || ''}</td><td style="text-align:right">${fmt(rf)}</td><td style="text-align:right;font-weight:600">${fmt(ra)}</td><td style="text-align:center"><button onclick="resDeleteRow(${i})" title="Remove" style="border:none;background:none;color:#CBD5E1;cursor:pointer;font-size:16px;line-height:1" onmouseover="this.style.color='#DC2626'" onmouseout="this.style.color='#CBD5E1'">×</button></td></tr>`;
-  }).join('') : `<tr><td colspan="7" style="text-align:center;color:#94A3B8;padding:18px">No resources yet — <strong>Import forecast</strong> or <strong>Add resource</strong>.</td></tr>`;
+    const off = r.active === false;
+    const badge = `<button onclick="resToggleActive(${i})" title="Click to toggle active / inactive" style="cursor:pointer;border:none;font-size:10px;font-weight:700;padding:3px 10px;border-radius:11px;${off ? 'background:#F1F5F9;color:#94A3B8' : 'background:#DCFCE7;color:#15803D'}">${off ? 'Inactive' : 'Active'}</button>`;
+    return `<tr style="${off ? 'opacity:.5' : ''}"><td style="font-weight:500">${r.name || '—'}</td><td style="color:#64748B">${r.role || ''}</td><td>${r.domain || ''}</td><td style="color:#64748B">${r.release || ''}</td><td style="text-align:right">${fmt(rf)}</td><td style="text-align:right;font-weight:600">${fmt(ra)}</td><td style="text-align:center">${badge}</td><td style="text-align:center"><button onclick="resDeleteRow(${i})" title="Remove" style="border:none;background:none;color:#CBD5E1;cursor:pointer;font-size:16px;line-height:1" onmouseover="this.style.color='#DC2626'" onmouseout="this.style.color='#CBD5E1'">×</button></td></tr>`;
+  }).join('') : `<tr><td colspan="8" style="text-align:center;color:#94A3B8;padding:18px">No resources yet — <strong>Import forecast</strong> or <strong>Add resource</strong>.</td></tr>`;
 
   document.getElementById('resourcingView').innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px">
@@ -4137,15 +4141,16 @@ function renderResourcingView() {
       ${kpi('Forecast (total)', fmt(T.fTot), 'man-days in window', '#0F2544')}
       ${kpi('Actual to date', fmt(T.aEl), 'of ' + fmt(T.fEl) + ' planned (elapsed)', '#2563EB')}
       ${kpi('Variance to date', (varPct > 0 ? '+' : '') + varPct.toFixed(1) + '%', Math.round(varE) + ' md vs plan', Math.abs(varPct) < 5 ? '#0F2544' : varPct > 0 ? '#B45309' : '#0F766E')}
-      ${kpi('Resources', rows.length, 'people / lines', '#0F2544')}
+      ${kpi('Active resources', activeCount, 'of ' + rows.length + ' total' + (rows.length - activeCount ? ' · ' + (rows.length - activeCount) + ' inactive' : ''), '#0F2544')}
     </div>
     <div class="res-card" style="border-radius:14px"><div class="res-card-title">Forecast vs Actual by month
       <span class="res-hint">grey = forecast · blue = actual (timesheet upload)</span></div>${bars}</div>
     <div class="res-card" style="border-radius:14px"><div class="res-card-title">By domain — elapsed period</div>
       <table class="dtable"><thead><tr><th>Domain</th><th style="text-align:right">Forecast</th><th style="text-align:right">Actual</th><th style="text-align:right">Variance</th><th style="text-align:right">Full FC</th></tr></thead><tbody>${domRows}</tbody></table></div>
     <div class="res-card" style="border-radius:14px"><div class="res-card-title">Resources <span class="res-hint">imported or added manually</span></div>
-      <table class="dtable"><thead><tr><th>Name</th><th>Role</th><th>Domain</th><th>Release</th><th style="text-align:right">FC md</th><th style="text-align:right">Act md</th><th></th></tr></thead><tbody>${resList}</tbody></table></div>`;
+      <table class="dtable"><thead><tr><th>Name</th><th>Role</th><th>Domain</th><th>Release</th><th style="text-align:right">FC md</th><th style="text-align:right">Act md</th><th style="text-align:center">Status</th><th></th></tr></thead><tbody>${resList}</tbody></table></div>`;
 }
+function resToggleActive(i) { const r = resourcing.rows[i]; if (!r) return; r.active = (r.active === false); persistResourcing(); renderResourcingView(); }
 function resDeleteRow(i) { resourcing.rows.splice(i, 1); persistResourcing(); renderResourcingView(); }
 function resClear() { if (confirm('Clear all ' + resourcing.rows.length + ' resource rows for ' + ORG + '?')) { resourcing.rows = []; persistResourcing(); renderResourcingView(); } }
 function resAddRow() {

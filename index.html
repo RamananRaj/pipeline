@@ -302,6 +302,7 @@ body.drag-active *{cursor:grabbing!important;user-select:none;}
       <button class="vtab" onclick="setView('levelling',this)">⚖ Levelling</button>
       <button class="vtab" onclick="setView('sizing',this)">👕 Sizing</button>
       <button class="vtab" id="tabResourcing" onclick="setView('resourcing',this)" style="display:none">💷 Resourcing</button>
+      <button class="vtab" id="tabRoadmap" onclick="setView('roadmap',this)" style="display:none">🗺 Roadmap</button>
       <button class="vtab" id="tabSettings" onclick="setView('settings',this)">⚙ Settings</button>
     </div>
     <button class="btn btn-ghost" id="shareBtn" onclick="copyShareUrl(false)" title="Copy shareable link">🔗 Share</button>
@@ -468,6 +469,7 @@ body.drag-active *{cursor:grabbing!important;user-select:none;}
 
 <!-- Stage 1: Resourcing (Genesis only) -->
 <div id="resourcingView" style="display:none;padding:16px 24px 40px"></div>
+<div id="roadmapView" style="display:none;padding:16px 24px 40px"></div>
 
 <!-- ── Cloud Sync Modal ── -->
 <div class="mo" id="moCloud" onclick="bgClose(event,'moCloud')">
@@ -924,7 +926,8 @@ const expanded = new Set(); // project IDs that are expanded to show phases
 function cloudPayload() {
   return { v: 2, org: ORG, horizon: HORIZON, projects, workOrders: (typeof workOrders !== 'undefined' ? workOrders : []),
            sizingConfig: (typeof sizingConfig !== 'undefined' ? sizingConfig : null),
-           resourcing: (typeof resourcing !== 'undefined' ? resourcing : { rows: [] }) };
+           resourcing: (typeof resourcing !== 'undefined' ? resourcing : { rows: [] }),
+           roadmap: (typeof roadmap !== 'undefined' ? roadmap : { sections: [], milestones: [] }) };
 }
 
 /** Debounced push of the full payload to the configured cloud backend. */
@@ -1247,7 +1250,8 @@ function setView(v, el) {
   const dashMain    = document.getElementById('dashboardView');
   const setMain     = document.getElementById('settingsView');
   const rsrcMain    = document.getElementById('resourcingView');
-  [ganttMain, resMain, lvMain, sizingMain, dashMain, setMain, rsrcMain].forEach(m => { if (m) m.style.display = 'none'; });
+  const roadMain    = document.getElementById('roadmapView');
+  [ganttMain, resMain, lvMain, sizingMain, dashMain, setMain, rsrcMain, roadMain].forEach(m => { if (m) m.style.display = 'none'; });
   if (v === 'resources') {
     resMain.style.display = 'block'; renderResView();
   } else if (v === 'levelling') {
@@ -1260,6 +1264,8 @@ function setView(v, el) {
     setMain.style.display = 'block'; renderSettingsView();
   } else if (v === 'resourcing') {
     rsrcMain.style.display = 'block'; renderResourcingView();
+  } else if (v === 'roadmap') {
+    roadMain.style.display = 'block'; renderRoadmap();
   } else {
     ganttMain.style.display = ''; render();
   }
@@ -2373,6 +2379,11 @@ function applyCloudData(data) {
       resourcing = data.resourcing;
       localStorage.setItem(KP + 'resourcing', JSON.stringify(resourcing));
     }
+    if (data.roadmap && Array.isArray(data.roadmap.sections)) {
+      roadmap = data.roadmap;
+      if (!Array.isArray(roadmap.milestones)) roadmap.milestones = [];
+      localStorage.setItem(KP + 'roadmap', JSON.stringify(roadmap));
+    }
   }
   migrateProjects();
   nextProjId = Math.max(...projects.map(p => p.id), 18) + 1;
@@ -3310,6 +3321,11 @@ const WO_DEFAULTS = [
 let resourcing = JSON.parse(localStorage.getItem(KP + 'resourcing') || 'null') || { rows: [] };
 if (!resourcing || !Array.isArray(resourcing.rows)) resourcing = { rows: [] };
 function persistResourcing() { localStorage.setItem(KP + 'resourcing', JSON.stringify(resourcing)); pushCloud(); }
+// ── Stage 2: Roadmap (Genesis) — nested swimlanes + milestones ──
+let roadmap = JSON.parse(localStorage.getItem(KP + 'roadmap') || 'null') || null;
+if (!roadmap || !Array.isArray(roadmap.sections)) roadmap = { sections: [], milestones: [] };
+if (!Array.isArray(roadmap.milestones)) roadmap.milestones = [];
+function persistRoadmap() { localStorage.setItem(KP + 'roadmap', JSON.stringify(roadmap)); pushCloud(); }
 let workOrders = JSON.parse(localStorage.getItem(KP + 'wos') || 'null') || (ORG === 'AAR' ? WO_DEFAULTS.map(w => ({ ...w, projects:[...w.projects] })) : []);
 workOrders.forEach(w => { if (!Array.isArray(w.projects)) w.projects = []; if (w.ba == null) w.ba = 0; });
 let nextWoId    = Math.max(0, ...workOrders.map(w => w.id || 0)) + 1;
@@ -4448,13 +4464,270 @@ function _resMapImport(arr, mode) {
   alert('Imported ' + n + ' rows into "' + field + '"' + (weekly ? ' — weekly hours rolled up to man-days (37.5 h/week = 5 days).' + (otAny ? ' Hours over 37.5/week are included in Actual and flagged as overtime.' : '') : '.'));
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  STAGE 2 — Roadmap (Genesis): nested swimlanes, milestones, print/PDF
+// ═══════════════════════════════════════════════════════════════════════════
+const RM_CATS = [['phase', 'Phase / Release', '#1F3864'], ['design', 'Design / Align', '#5B9BD5'], ['build', 'Build', '#2E7D32'], ['test', 'Testing', '#4A90D9'], ['integ', 'Integration', '#E07B39'], ['mig', 'Migration', '#7F7F7F'], ['ocm', 'OCM / Change', '#8BC34A']];
+function rmCatColor(c) { const f = RM_CATS.find(x => x[0] === c); return f ? f[2] : '#64748B'; }
+function rmCatName(c) { const f = RM_CATS.find(x => x[0] === c); return f ? f[1] : c; }
+function rmId() { return Date.now() * 1000 + Math.floor(Math.random() * 1000); }
+function rmPct(dateStr) { if (!dateStr) return 0; const d = new Date(dateStr + 'T00:00:00Z'); const days = (d - GSTART) / 86400000; return Math.max(0, Math.min(100, days / GTOTAL * 100)); }
+function rmFindSection(sid) { return roadmap.sections.find(s => s.id === sid); }
+function rmFindBar(sid, gid, lid, bid) { const s = rmFindSection(sid); const g = s && s.groups.find(x => x.id === gid); const ln = g && g.lanes.find(x => x.id === lid); const b = ln && (ln.bars || []).find(x => x.id === bid); return { s, g, ln, b }; }
+
+function rmAddSection() { const name = prompt('Section heading (e.g. Track 1: Build & Test):'); if (!name) return; roadmap.sections.push({ id: rmId(), name: name.trim(), color: '#1F3864', groups: [{ id: rmId(), name: '', lanes: [] }] }); persistRoadmap(); renderRoadmap(); }
+function rmEditSection(sid) { const s = rmFindSection(sid); if (!s) return; const name = prompt('Section heading:', s.name); if (name === null) return; s.name = name.trim(); const col = prompt('Section colour (hex, e.g. #1F3864):', s.color || '#1F3864'); if (col !== null && col.trim()) s.color = col.trim(); persistRoadmap(); renderRoadmap(); }
+function rmDelSection(sid) { if (!confirm('Delete this section and everything in it?')) return; roadmap.sections = roadmap.sections.filter(s => s.id !== sid); persistRoadmap(); renderRoadmap(); }
+function rmAddGroup(sid) { const s = rmFindSection(sid); if (!s) return; const name = prompt('Sub-section heading:'); if (name === null || !name.trim()) return; s.groups.push({ id: rmId(), name: name.trim(), lanes: [] }); persistRoadmap(); renderRoadmap(); }
+function rmEditGroup(sid, gid) { const s = rmFindSection(sid); const g = s && s.groups.find(x => x.id === gid); if (!g) return; const name = prompt('Sub-section heading:', g.name); if (name === null) return; g.name = name.trim(); persistRoadmap(); renderRoadmap(); }
+function rmDelGroup(sid, gid) { const s = rmFindSection(sid); if (!s) return; if (!confirm('Delete this sub-section and its lanes?')) return; s.groups = s.groups.filter(g => g.id !== gid); persistRoadmap(); renderRoadmap(); }
+function rmAddLaneToSection(sid) { const s = rmFindSection(sid); if (!s) return; if (!s.groups.length) s.groups.push({ id: rmId(), name: '', lanes: [] }); const g = s.groups[0]; const name = prompt('Swimlane name:'); if (name === null) return; g.lanes.push({ id: rmId(), name: name.trim(), bars: [] }); persistRoadmap(); renderRoadmap(); }
+function rmAddLane(sid, gid) { const s = rmFindSection(sid); const g = s && s.groups.find(x => x.id === gid); if (!g) return; const name = prompt('Swimlane name:'); if (name === null) return; g.lanes.push({ id: rmId(), name: name.trim(), bars: [] }); persistRoadmap(); renderRoadmap(); }
+function rmEditLane(sid, gid, lid) { const { ln } = rmFindBar(sid, gid, lid); if (!ln) return; const name = prompt('Swimlane name:', ln.name); if (name === null) return; ln.name = name.trim(); persistRoadmap(); renderRoadmap(); }
+function rmDelLane(sid, gid, lid) { const s = rmFindSection(sid); const g = s && s.groups.find(x => x.id === gid); if (!g) return; if (!confirm('Delete this swimlane?')) return; g.lanes = g.lanes.filter(l => l.id !== lid); persistRoadmap(); renderRoadmap(); }
+
+let rmTarget = null;
+function rmCloseModal() { const w = document.getElementById('rmModalWrap'); if (w) w.remove(); }
+function rmOpenBar(sid, gid, lid, bid) {
+  rmTarget = { sid, gid, lid, bid };
+  const b = bid ? (rmFindBar(sid, gid, lid, bid).b || {}) : {};
+  const esc = s => String(s == null ? '' : s).replace(/"/g, '&quot;');
+  const opts = RM_CATS.map(c => `<option value="${c[0]}" ${b.cat === c[0] ? 'selected' : ''}>${c[1]}</option>`).join('');
+  rmCloseModal();
+  const wrap = document.createElement('div'); wrap.id = 'rmModalWrap';
+  wrap.style.cssText = 'position:fixed;inset:0;background:rgba(15,37,68,.45);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px';
+  wrap.onclick = e => { if (e.target === wrap) rmCloseModal(); };
+  wrap.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:460px;width:100%;box-shadow:0 20px 60px rgba(15,37,68,.3);padding:24px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><div style="font-size:17px;font-weight:800;color:#0F2544">${bid ? 'Edit bar' : 'New bar'}</div><button onclick="rmCloseModal()" style="border:none;background:none;font-size:22px;color:#CBD5E1;cursor:pointer">×</button></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <label style="grid-column:1/3;display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:#64748B">Label<input id="rbLabel" value="${esc(b.label)}" style="padding:8px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:13px"></label>
+      <label style="grid-column:1/3;display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:#64748B">Category<select id="rbCat" style="padding:8px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:13px">${opts}</select></label>
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:#64748B">Start<input id="rbStart" type="date" value="${esc(b.start)}" style="padding:8px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:13px"></label>
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:#64748B">End<input id="rbEnd" type="date" value="${esc(b.end)}" style="padding:8px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:13px"></label>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:20px">
+      <div>${bid ? `<button onclick="rmDelBar()" style="border:none;background:none;color:#DC2626;cursor:pointer;font-size:12px">Delete</button>` : ''}</div>
+      <div style="display:flex;gap:10px"><button onclick="rmCloseModal()" style="background:#F1F5F9;color:#475569;border:none;padding:9px 16px;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px">Cancel</button><button onclick="rmSaveBar()" style="background:#0F2544;color:#fff;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-weight:700;font-size:13px">Save</button></div>
+    </div></div>`;
+  document.body.appendChild(wrap);
+  const l = document.getElementById('rbLabel'); if (l) l.focus();
+}
+function rmSaveBar() {
+  const g = id => { const el = document.getElementById(id); return el ? el.value : ''; };
+  const label = g('rbLabel').trim(), cat = g('rbCat'), start = g('rbStart'), end = g('rbEnd');
+  if (!start || !end) { alert('Start and end dates are required.'); return; }
+  if (end < start) { alert('End date must be on or after the start date.'); return; }
+  const t = rmTarget; const { ln } = rmFindBar(t.sid, t.gid, t.lid);
+  if (!ln) return;
+  if (t.bid) { const b = (ln.bars || []).find(x => x.id === t.bid); if (b) { b.label = label; b.cat = cat; b.start = start; b.end = end; } }
+  else { ln.bars = ln.bars || []; ln.bars.push({ id: rmId(), label, cat, start, end }); }
+  persistRoadmap(); rmCloseModal(); renderRoadmap();
+}
+function rmDelBar() { const t = rmTarget; if (!t || !t.bid) return; const { ln } = rmFindBar(t.sid, t.gid, t.lid); if (ln) ln.bars = (ln.bars || []).filter(b => b.id !== t.bid); persistRoadmap(); rmCloseModal(); renderRoadmap(); }
+
+function rmOpenMilestone(mid) {
+  const m = mid ? (roadmap.milestones.find(x => x.id === mid) || {}) : {};
+  const esc = s => String(s == null ? '' : s).replace(/"/g, '&quot;');
+  rmCloseModal();
+  const wrap = document.createElement('div'); wrap.id = 'rmModalWrap';
+  wrap.style.cssText = 'position:fixed;inset:0;background:rgba(15,37,68,.45);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px';
+  wrap.onclick = e => { if (e.target === wrap) rmCloseModal(); };
+  wrap.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:420px;width:100%;box-shadow:0 20px 60px rgba(15,37,68,.3);padding:24px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><div style="font-size:17px;font-weight:800;color:#0F2544">${mid ? 'Edit milestone' : 'New milestone'}</div><button onclick="rmCloseModal()" style="border:none;background:none;font-size:22px;color:#CBD5E1;cursor:pointer">×</button></div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:#64748B">Label<input id="rmLabel" value="${esc(m.label)}" placeholder="e.g. R2.1 Go-Live" style="padding:8px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:13px"></label>
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:#64748B">Date<input id="rmDate" type="date" value="${esc(m.date)}" style="padding:8px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:13px"></label>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:20px">
+      <div>${mid ? `<button onclick="rmDelMilestone(${mid})" style="border:none;background:none;color:#DC2626;cursor:pointer;font-size:12px">Delete</button>` : ''}</div>
+      <div style="display:flex;gap:10px"><button onclick="rmCloseModal()" style="background:#F1F5F9;color:#475569;border:none;padding:9px 16px;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px">Cancel</button><button onclick="rmSaveMilestone(${mid || 0})" style="background:#0F2544;color:#fff;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-weight:700;font-size:13px">Save</button></div>
+    </div></div>`;
+  document.body.appendChild(wrap);
+}
+function rmSaveMilestone(mid) {
+  const label = (document.getElementById('rmLabel') || {}).value || '';
+  const date = (document.getElementById('rmDate') || {}).value || '';
+  if (!date) { alert('A date is required.'); return; }
+  if (mid) { const m = roadmap.milestones.find(x => x.id === mid); if (m) { m.label = label.trim(); m.date = date; } }
+  else { roadmap.milestones.push({ id: rmId(), label: label.trim(), date }); }
+  persistRoadmap(); rmCloseModal(); renderRoadmap();
+}
+function rmDelMilestone(mid) { roadmap.milestones = roadmap.milestones.filter(m => m.id !== mid); persistRoadmap(); rmCloseModal(); renderRoadmap(); }
+
+function rmSeedGenesis() {
+  if (roadmap.sections.length && !confirm('Replace the current roadmap with the Genesis starter structure?')) return;
+  const mk = (mm, dd) => { const y = mm >= 6 ? 2026 : (mm <= 3 ? 2028 : 2027); return `${y}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`; };
+  roadmap = {
+    sections: [
+      { id: rmId(), name: 'Phases', color: '#C2410C', groups: [{ id: rmId(), name: '', lanes: [
+        { id: rmId(), name: 'Releases', bars: [
+          { id: rmId(), label: 'Blueprint / Co-Design', cat: 'design', start: '2026-06-01', end: '2026-08-15' },
+          { id: rmId(), label: 'R2.0 / R2.1', cat: 'phase', start: '2026-08-15', end: '2027-09-30' },
+          { id: rmId(), label: 'R2.2', cat: 'phase', start: '2027-05-01', end: '2028-02-28' } ] } ] }] },
+      { id: rmId(), name: 'Track 1: Build & Test', color: '#1F3864', groups: [{ id: rmId(), name: '', lanes: [
+        { id: rmId(), name: 'Build', bars: [{ id: rmId(), label: 'Implementation', cat: 'build', start: '2026-09-01', end: '2027-02-28' }] },
+        { id: rmId(), name: 'System Testing', bars: [{ id: rmId(), label: 'System Testing', cat: 'build', start: '2027-01-15', end: '2027-04-30' }] },
+        { id: rmId(), name: 'SIT', bars: [{ id: rmId(), label: 'SIT — M2C', cat: 'test', start: '2027-03-15', end: '2027-06-30' }] },
+        { id: rmId(), name: 'UAT', bars: [{ id: rmId(), label: 'UAT', cat: 'test', start: '2027-05-15', end: '2027-08-15' }] },
+        { id: rmId(), name: 'BVT / PT', bars: [{ id: rmId(), label: 'BVT', cat: 'test', start: '2027-07-15', end: '2027-08-31' }, { id: rmId(), label: 'PT', cat: 'test', start: '2027-08-15', end: '2027-09-30' }] } ] }] },
+      { id: rmId(), name: 'Track 2: Integration', color: '#2E7D32', groups: [{ id: rmId(), name: '', lanes: [
+        { id: rmId(), name: 'ECS Sub-track 2.1', bars: [{ id: rmId(), label: 'ECS Build', cat: 'integ', start: '2027-03-01', end: '2027-12-31' }, { id: rmId(), label: 'SIT–UAT', cat: 'test', start: '2027-06-01', end: '2028-02-28' }] },
+        { id: rmId(), name: 'G2 Sub-track 2.2', bars: [{ id: rmId(), label: 'G2 Integration Build', cat: 'build', start: '2027-03-01', end: '2027-06-30' }] } ] }] },
+      { id: rmId(), name: 'Track 3: Data Migration', color: '#334155', groups: [{ id: rmId(), name: '', lanes: [
+        { id: rmId(), name: 'M2C DM E2E', bars: [{ id: rmId(), label: 'Migration Runs', cat: 'mig', start: '2027-05-01', end: '2028-02-28' }] } ] }] },
+      { id: rmId(), name: 'OCM / Change', color: '#1F3864', groups: [{ id: rmId(), name: '', lanes: [
+        { id: rmId(), name: 'Training', bars: [{ id: rmId(), label: 'Training Delivery (TTT)', cat: 'ocm', start: '2027-07-01', end: '2027-09-30' }] },
+        { id: rmId(), name: 'Business Readiness', bars: [{ id: rmId(), label: 'Business Readiness', cat: 'ocm', start: '2027-08-01', end: '2027-11-30' }] } ] }] } ],
+    milestones: [
+      { id: rmId(), label: 'BP Signoff', date: '2026-08-15' },
+      { id: rmId(), label: 'Build Start', date: '2026-09-01' },
+      { id: rmId(), label: 'SIT Start', date: '2027-03-15' },
+      { id: rmId(), label: 'R2.1 Go-Live', date: '2027-09-30' },
+      { id: rmId(), label: 'R2.2 Go-Live', date: '2028-02-28' } ]
+  };
+  persistRoadmap(); renderRoadmap();
+}
+
+function renderRoadmap() {
+  const el = document.getElementById('roadmapView'); if (!el) return;
+  const LBL = 210;
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const todayPct = rmPct(todayISO);
+  const btn = (fn, txt, extra) => `<button onclick="${fn}" style="border:none;background:rgba(255,255,255,.22);color:#fff;cursor:pointer;font-size:10px;font-weight:700;border-radius:6px;padding:2px 8px;margin-left:5px;${extra || ''}">${txt}</button>`;
+  const laneBtn = (fn, txt, col) => `<button onclick="${fn}" title="${txt}" style="border:1px solid #E2E8F0;background:#fff;color:${col || '#94A3B8'};cursor:pointer;font-size:11px;font-weight:700;border-radius:6px;padding:0 6px;line-height:18px">${txt}</button>`;
+
+  const axis = GMONTHS.map(g => { const ms = Date.UTC(g.y, g.m, 1), me = Date.UTC(g.y, g.m + 1, 0); const w = ((me - ms) / 86400000 + 1) / GTOTAL * 100; const wk = Math.max(1, Math.round((me - GSTART) / (7 * 86400000))); return `<div style="width:${w}%;flex:none;text-align:center;padding:4px 0;border-right:1px solid #22375a;overflow:hidden;white-space:nowrap"><div style="font-size:10px;color:#cbd5e1">${g.label}</div><div style="font-size:8px;color:#7f93ad">W${wk}</div></div>`; }).join('');
+
+  const mss = (roadmap.milestones || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const msHtml = mss.map((m, i) => { const l = rmPct(m.date); const tier = (i % 3) * 18; return `<div onclick="rmOpenMilestone(${m.id})" title="${String(m.label || '').replace(/"/g, '&quot;')} · ${m.date || ''}" style="position:absolute;left:${l}%;top:${tier}px;font-size:9.5px;color:#0F2544;cursor:pointer;white-space:nowrap"><span style="color:#EA580C;font-weight:800">▶</span> ${m.label || ''}</div><div style="position:absolute;left:${l}%;top:${tier + 12}px;bottom:0;width:1.5px;background:#F59E0B;opacity:.5"></div>`; }).join('');
+
+  let body = '', laneIdx = 0;
+  roadmap.sections.forEach(s => {
+    body += `<div style="display:flex;align-items:center;background:${s.color || '#1F3864'};color:#fff;font-size:11px;font-weight:800;padding:5px 8px">
+      <div style="flex:1">${s.name || 'Section'}</div>
+      ${btn(`rmAddLaneToSection(${s.id})`, '+ Lane')}${btn(`rmAddGroup(${s.id})`, '+ Sub-section')}${btn(`rmEditSection(${s.id})`, '✎')}${btn(`rmDelSection(${s.id})`, '×')}</div>`;
+    (s.groups || []).forEach(g => {
+      if (g.name) body += `<div style="display:flex;align-items:center;background:#EEF2F7;color:#334155;font-size:10.5px;font-weight:700;padding:3px 8px 3px 18px"><div style="flex:1">${g.name}</div>${laneBtn(`rmAddLane(${s.id},${g.id})`, '+ Lane')} <span style="width:5px"></span>${laneBtn(`rmEditGroup(${s.id},${g.id})`, '✎')}${laneBtn(`rmDelGroup(${s.id},${g.id})`, '×', '#DC2626')}</div>`;
+      (g.lanes || []).forEach(ln => {
+        const bars = (ln.bars || []).map(b => { const l = rmPct(b.start), w = Math.max(0.6, rmPct(b.end) - rmPct(b.start)); return `<div data-rmbar data-sid="${s.id}" data-gid="${g.id}" data-lid="${ln.id}" data-bid="${b.id}" title="${String(b.label || '').replace(/"/g, '&quot;')} (${b.start || ''} → ${b.end || ''}) — drag to move, edges to resize, click to edit" style="position:absolute;top:4px;left:${l}%;width:${w}%;height:16px;background:${rmCatColor(b.cat)};border-radius:3px;color:#fff;font-size:9px;font-weight:700;line-height:16px;overflow:hidden;white-space:nowrap;cursor:grab;user-select:none"><span data-rmh="l" style="position:absolute;left:0;top:0;bottom:0;width:6px;cursor:col-resize"></span><span style="display:block;padding:0 7px;pointer-events:none;overflow:hidden;text-overflow:ellipsis">${b.label || ''}</span><span data-rmh="r" style="position:absolute;right:0;top:0;bottom:0;width:6px;cursor:col-resize"></span></div>`; }).join('');
+        body += `<div style="display:flex;border-bottom:1px solid #EEF2F7;min-height:26px">
+          <div style="width:${LBL}px;flex:none;display:flex;align-items:center;gap:5px;padding:0 8px;font-size:11px;color:#334155;background:#F8FAFC;border-right:1px solid #E2E8F0"><span onclick="rmEditLane(${s.id},${g.id},${ln.id})" title="Rename" style="cursor:pointer;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${ln.name || 'Lane'}</span>${laneBtn(`rmAddBar(${s.id},${g.id},${ln.id})`, '+', '#2563EB')}${laneBtn(`rmDelLane(${s.id},${g.id},${ln.id})`, '×', '#DC2626')}</div>
+          <div style="flex:1;position:relative;background:${(laneIdx++ % 2) ? '#FAFBFC' : '#fff'}">${todayPct > 0 && todayPct < 100 ? `<div style="position:absolute;top:0;bottom:0;left:${todayPct}%;width:2px;background:#EF4444;z-index:3"></div>` : ''}${bars}</div>
+        </div>`;
+      });
+    });
+  });
+
+  const legend = RM_CATS.map(c => `<span style="display:inline-flex;align-items:center;gap:5px;font-size:10px;color:#64748B;margin-right:12px"><span style="width:20px;height:10px;border-radius:2px;background:${c[2]}"></span>${c[1]}</span>`).join('');
+  const empty = !roadmap.sections.length ? `<div style="text-align:center;color:#94A3B8;padding:40px 20px">No roadmap yet. <button onclick="rmAddSection()" style="background:#0F2544;color:#fff;border:none;padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:600;margin:0 6px">+ Add section</button> or <button onclick="rmSeedGenesis()" style="background:#0F766E;color:#fff;border:none;padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:600;margin-left:6px">Load Genesis starter</button></div>` : '';
+
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px">
+      <div><div style="font-size:20px;font-weight:800;color:#0F2544;letter-spacing:-.01em">Roadmap</div>
+        <div style="font-size:12px;color:#64748B;margin-top:2px">Nested swimlanes · ${roadmap.sections.length} sections · ${ORG}</div></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" onclick="rmAddSection()" style="font-size:11px">＋ Section</button>
+        <button class="btn btn-ghost btn-sm" onclick="rmOpenMilestone(0)" style="font-size:11px">⚑ Milestone</button>
+        ${roadmap.sections.length ? `<button class="btn btn-ghost btn-sm" onclick="rmSeedGenesis()" style="font-size:11px">↻ Genesis starter</button>` : ''}
+        <button class="btn btn-ghost btn-sm" onclick="rmPrint()" style="font-size:11px">🖨 Print / PDF</button>
+      </div>
+    </div>
+    <div style="margin-bottom:10px">${legend}</div>
+    ${empty}
+    <div style="border:1px solid #E2E8F0;border-radius:10px;overflow-x:auto">
+      <div style="min-width:${Math.max(900, GMONTHS.length * 46 + LBL)}px">
+        <div style="position:relative;height:64px;margin-left:${LBL}px;border-bottom:1px solid #EEF2F7">${msHtml}</div>
+        <div style="display:flex;background:#0F2544;color:#fff">
+          <div style="width:${LBL}px;flex:none;font-size:10px;color:#cbd5e1;display:flex;align-items:center;padding:0 8px">Section / Swimlane</div>
+          <div style="flex:1;display:flex">${axis}</div>
+        </div>
+        ${body}
+      </div>
+    </div>
+    <div style="font-size:10px;color:#94A3B8;margin-top:10px">Click a bar to edit · ▶ milestone to edit · red line = today. Aligns to the timeline window (${GMONTHS[0] ? GMONTHS[0].label : ''} – ${GMONTHS.length ? GMONTHS[GMONTHS.length - 1].label : ''}).</div>`;
+}
+
+// ── Drag-to-move / drag-edge-to-resize (like the Gantt) ──
+function rmAddDays(iso, n) { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+let rmDrag = null;
+function rmDragStart(e) {
+  const bar = e.target.closest && e.target.closest('[data-rmbar]'); if (!bar) return;
+  const mode = e.target.getAttribute && e.target.getAttribute('data-rmh') || 'move';
+  const track = bar.parentElement; if (!track) return;
+  const sid = +bar.dataset.sid, gid = +bar.dataset.gid, lid = +bar.dataset.lid, bid = +bar.dataset.bid;
+  const { b } = rmFindBar(sid, gid, lid, bid); if (!b) return;
+  rmDrag = { mode, bar, trackW: track.getBoundingClientRect().width, startX: e.clientX, os: b.start, oe: b.end, sid, gid, lid, bid, moved: false, cur: null };
+  bar.style.cursor = mode === 'move' ? 'grabbing' : 'col-resize';
+  e.preventDefault();
+}
+function rmDragMove(e) {
+  if (!rmDrag) return;
+  const dx = e.clientX - rmDrag.startX;
+  if (Math.abs(dx) > 3) rmDrag.moved = true;
+  const dd = Math.round(dx / rmDrag.trackW * GTOTAL);
+  let ns = rmDrag.os, ne = rmDrag.oe;
+  if (rmDrag.mode === 'move') { ns = rmAddDays(rmDrag.os, dd); ne = rmAddDays(rmDrag.oe, dd); }
+  else if (rmDrag.mode === 'l') { ns = rmAddDays(rmDrag.os, dd); if (ns > ne) ns = ne; }
+  else if (rmDrag.mode === 'r') { ne = rmAddDays(rmDrag.oe, dd); if (ne < ns) ne = ns; }
+  rmDrag.cur = { ns, ne };
+  const l = rmPct(ns), w = Math.max(0.6, rmPct(ne) - rmPct(ns));
+  rmDrag.bar.style.left = l + '%'; rmDrag.bar.style.width = w + '%';
+}
+function rmDragEnd() {
+  if (!rmDrag) return;
+  const d = rmDrag; rmDrag = null;
+  if (d.moved && d.cur) { const { b } = rmFindBar(d.sid, d.gid, d.lid, d.bid); if (b) { b.start = d.cur.ns; b.end = d.cur.ne; } persistRoadmap(); renderRoadmap(); }
+  else { rmOpenBar(d.sid, d.gid, d.lid, d.bid); }   // no real drag ⇒ treat as click-to-edit
+}
+document.addEventListener('mousedown', rmDragStart);
+document.addEventListener('mousemove', rmDragMove);
+document.addEventListener('mouseup', rmDragEnd);
+
+function rmPrint() {
+  const LBL = 190;
+  const todayPct = rmPct(new Date().toISOString().slice(0, 10));
+  const axis = GMONTHS.map(g => { const ms = Date.UTC(g.y, g.m, 1), me = Date.UTC(g.y, g.m + 1, 0); const w = ((me - ms) / 86400000 + 1) / GTOTAL * 100; const wk = Math.max(1, Math.round((me - GSTART) / (7 * 86400000))); return `<div class="mc" style="width:${w}%">${g.label}<div class="wk">W${wk}</div></div>`; }).join('');
+  const mss = (roadmap.milestones || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const msHtml = mss.map((m, i) => { const l = rmPct(m.date); const tier = (i % 3) * 16; return `<div class="ms" style="left:${l}%;top:${tier}px"><span class="fl">▶</span> ${m.label || ''}</div><div class="msl" style="left:${l}%;top:${tier + 11}px"></div>`; }).join('');
+  let body = '', laneIdx = 0;
+  roadmap.sections.forEach(s => {
+    body += `<div class="sec" style="background:${s.color || '#1F3864'}">${s.name || ''}</div>`;
+    (s.groups || []).forEach(g => {
+      if (g.name) body += `<div class="grp">${g.name}</div>`;
+      (g.lanes || []).forEach(ln => {
+        const bars = (ln.bars || []).map(b => { const l = rmPct(b.start), w = Math.max(0.6, rmPct(b.end) - rmPct(b.start)); return `<div class="bar" style="left:${l}%;width:${w}%;background:${rmCatColor(b.cat)}">${b.label || ''}</div>`; }).join('');
+        const tl = todayPct > 0 && todayPct < 100 ? `<div class="today" style="left:${todayPct}%"></div>` : '';
+        body += `<div class="row"><div class="lbl">${ln.name || ''}</div><div class="trk"${(laneIdx++ % 2) ? ' style="background:#FAFBFC"' : ''}>${tl}${bars}</div></div>`;
+      });
+    });
+  });
+  const legend = RM_CATS.map(c => `<span class="lg"><span class="sw" style="background:${c[2]}"></span>${c[1]}</span>`).join('');
+  const doc = `<!doctype html><html><head><meta charset="utf-8"><title>${ORG} — Roadmap</title><style>
+    *{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#1E293B;font-size:11px;padding:16px}
+    h1{font-size:18px;color:#0F2544;font-weight:800;margin-bottom:8px}.legend{margin:6px 0 10px}.lg{display:inline-flex;align-items:center;gap:5px;font-size:10px;color:#64748B;margin-right:12px}.sw{width:20px;height:10px;border-radius:2px}
+    .board{border:1px solid #E2E8F0;border-radius:6px;overflow:hidden;min-width:1000px}
+    .msband{position:relative;height:58px;margin-left:${LBL}px}.ms{position:absolute;font-size:9px;color:#0F2544;white-space:nowrap}.fl{color:#EA580C;font-weight:800}.msl{position:absolute;bottom:0;width:1.5px;background:#F59E0B;opacity:.5;height:44px}
+    .axis{display:flex;background:#0F2544;color:#fff}.axis .sp{width:${LBL}px;flex:none;font-size:10px;color:#cbd5e1;display:flex;align-items:center;padding:0 8px}.axis .mrow{flex:1;display:flex}.mc{flex:none;text-align:center;font-size:9px;padding:3px 0;border-right:1px solid #22375a;color:#cbd5e1}.mc .wk{font-size:7.5px;color:#7f93ad}.today{position:absolute;top:0;bottom:0;width:1.5px;background:#EF4444;z-index:3}
+    .sec{color:#fff;font-size:11px;font-weight:800;padding:4px 8px}.grp{background:#EEF2F7;color:#334155;font-size:10px;font-weight:700;padding:3px 8px 3px 18px}
+    .row{display:flex;border-bottom:1px solid #EEF2F7;min-height:24px}.lbl{width:${LBL}px;flex:none;font-size:10px;color:#334155;background:#F8FAFC;border-right:1px solid #E2E8F0;display:flex;align-items:center;padding:0 8px}.trk{flex:1;position:relative;background:#fff}
+    .bar{position:absolute;top:4px;height:15px;border-radius:3px;color:#fff;font-size:8.5px;font-weight:700;padding:0 4px;line-height:15px;overflow:hidden;white-space:nowrap}
+    @media print{@page{size:A3 landscape;margin:8mm}body{padding:0}.board{min-width:0}}
+    </style></head><body><h1>${ORG} — Implementation Roadmap</h1><div class="legend">${legend}</div>
+    <div class="board"><div class="msband">${msHtml}</div><div class="axis"><div class="sp">Section / Swimlane</div><div class="mrow">${axis}</div></div>${body}</div>
+    <script>window.onload=function(){setTimeout(function(){window.print();},250);};<\/script></body></html>`;
+  const w = window.open('', '_blank'); if (!w) { alert('Please allow pop-ups to print the roadmap.'); return; }
+  w.document.open(); w.document.write(doc); w.document.close();
+}
+
 function applyInternalMode() {
   const d = document.getElementById('tabDashboard');
   const s = document.getElementById('tabSettings');
   const rs = document.getElementById('tabResourcing');
+  const rm = document.getElementById('tabRoadmap');
   if (d) d.style.display = internalMode ? '' : 'none';
   if (s) s.style.display = internalMode ? '' : 'none';
   if (rs) rs.style.display = (internalMode && isGenesis()) ? '' : 'none';   // Genesis-only
+  if (rm) rm.style.display = (internalMode && isGenesis()) ? '' : 'none';   // Genesis-only
   const btn = document.getElementById('internalToggle');
   if (btn) {
     btn.textContent  = internalMode ? '🔓 Internal' : '🔒';
@@ -4465,7 +4738,7 @@ function applyInternalMode() {
       : 'Internal views hidden (customer-safe) — click to show Dashboard & Settings';
   }
   // If hiding while currently on a now-hidden view, fall back to the timeline
-  if ((!internalMode && (viewMode === 'dashboard' || viewMode === 'settings')) || (viewMode === 'resourcing' && !(internalMode && isGenesis()))) {
+  if ((!internalMode && (viewMode === 'dashboard' || viewMode === 'settings')) || ((viewMode === 'resourcing' || viewMode === 'roadmap') && !(internalMode && isGenesis()))) {
     const t = [...document.querySelectorAll('.vtab')].find(x => x.textContent.includes('By Stream'));
     setView('stream', t);
   }

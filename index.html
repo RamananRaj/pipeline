@@ -4310,24 +4310,22 @@ function resToggleActive(i) {
   const r = resourcing.rows[i]; if (!r) return;
   const today = new Date().toISOString().slice(0, 10);
   if (r.active === false) {
-    const d = prompt('Active again from (YYYY-MM-DD) — man-days count from this date:', r.activeFrom || today);
-    if (d === null) return;
-    r.active = true; r.activeFrom = (d || '').trim(); r.inactiveFrom = '';
+    uiModal('Reactivate resource', [{ id: 'd', label: 'Active again from — actuals count from this date', type: 'date', value: r.activeFrom || today }], 'Save', v => {
+      r.active = true; r.activeFrom = (v.d || '').trim(); r.inactiveFrom = ''; persistResourcing(); renderResourcingView();
+    });
   } else {
-    const d = prompt('Inactive from (YYYY-MM-DD) — no longer in the program; man-days stop from this date:', today);
-    if (d === null) return;
-    r.active = false; r.inactiveFrom = (d || '').trim();
+    uiModal('Make inactive', [{ id: 'd', label: 'Inactive from — no longer in the program', type: 'date', value: today }], 'Save', v => {
+      r.active = false; r.inactiveFrom = (v.d || '').trim(); persistResourcing(); renderResourcingView();
+    });
   }
-  persistResourcing(); renderResourcingView();
 }
 function resEditETC(i) {
   const r = resourcing.rows[i]; if (!r) return;
-  const cur = r.etc != null ? r.etc : '';
-  const v = prompt('Estimate to Complete for ' + (r.name || 'this resource') + ' (man-days remaining).\nLeave blank to use remaining forecast:', cur);
-  if (v === null) return;
-  const t = String(v).trim();
-  if (t === '') { delete r.etc; } else { const n = parseFloat(t); if (!isNaN(n)) r.etc = n; }
-  persistResourcing(); renderResourcingView();
+  uiModal('Estimate to Complete', [{ id: 'etc', label: 'Man-days remaining for ' + (r.name || 'this resource') + ' (blank = remaining forecast)', type: 'number', value: (r.etc != null ? r.etc : '') }], 'Save', v => {
+    const t = String(v.etc).trim();
+    if (t === '') { delete r.etc; } else { const n = parseFloat(t); if (!isNaN(n)) r.etc = n; }
+    persistResourcing(); renderResourcingView();
+  });
 }
 // ── Resource detail modal — capture / edit everything in one place (also the "new resource" form) ──
 function resOpenDetail(i) {
@@ -4363,7 +4361,7 @@ function resOpenDetail(i) {
     </div>
     <div style="font-size:10.5px;color:#94A3B8;margin-top:12px">Start / end drive which months count: man-days only accrue from the start date up to (not including) the end date.</div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-top:20px">
-      <div>${isNew ? '' : `<button onclick="if(confirm('Remove this resource?')){resDeleteRow(${i});resCloseDetail();}" style="border:none;background:none;color:#DC2626;cursor:pointer;font-size:12px">Delete</button>`}</div>
+      <div>${isNew ? '' : `<button onclick="resConfirmDelete(${i})" style="border:none;background:none;color:#DC2626;cursor:pointer;font-size:12px">Delete</button>`}</div>
       <div style="display:flex;gap:10px">
         <button onclick="resCloseDetail()" style="background:#F1F5F9;color:#475569;border:none;padding:9px 16px;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px">Cancel</button>
         <button onclick="resSaveDetail(${isNew ? -1 : i})" style="background:#0F2544;color:#fff;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-weight:700;font-size:13px">${isNew ? 'Add resource' : 'Save'}</button>
@@ -4386,8 +4384,9 @@ function resSaveDetail(i) {
   if (i < 0) resourcing.rows.push(rec);
   persistResourcing(); resCloseDetail(); renderResourcingView();
 }
+function resConfirmDelete(i) { const r = resourcing.rows[i]; uiConfirm('Delete resource', 'Remove ' + (r && r.name ? '“' + r.name + '”' : 'this resource') + '?', () => { resDeleteRow(i); resCloseDetail(); }); }
 function resDeleteRow(i) { resourcing.rows.splice(i, 1); persistResourcing(); renderResourcingView(); }
-function resClear() { if (confirm('Clear all ' + resourcing.rows.length + ' resource rows for ' + ORG + '?')) { resourcing.rows = []; persistResourcing(); renderResourcingView(); } }
+function resClear() { uiConfirm('Clear resources', 'Clear all ' + resourcing.rows.length + ' resource rows for ' + ORG + '?', () => { resourcing.rows = []; persistResourcing(); renderResourcingView(); }, 'Clear all'); }
 function resAddRow() {
   const name = prompt('Resource name:'); if (!name) return;
   const domain = prompt('Domain (e.g. Billing, Payment, MDM):') || '';
@@ -4475,16 +4474,61 @@ function rmPct(dateStr) { if (!dateStr) return 0; const d = new Date(dateStr + '
 function rmFindSection(sid) { return roadmap.sections.find(s => s.id === sid); }
 function rmFindBar(sid, gid, lid, bid) { const s = rmFindSection(sid); const g = s && s.groups.find(x => x.id === gid); const ln = g && g.lanes.find(x => x.id === lid); const b = ln && (ln.bars || []).find(x => x.id === bid); return { s, g, ln, b }; }
 
-function rmAddSection() { const name = prompt('Section heading (e.g. Track 1: Build & Test):'); if (!name) return; roadmap.sections.push({ id: rmId(), name: name.trim(), color: '#1F3864', groups: [{ id: rmId(), name: '', lanes: [] }] }); persistRoadmap(); renderRoadmap(); }
-function rmEditSection(sid) { const s = rmFindSection(sid); if (!s) return; const name = prompt('Section heading:', s.name); if (name === null) return; s.name = name.trim(); const col = prompt('Section colour (hex, e.g. #1F3864):', s.color || '#1F3864'); if (col !== null && col.trim()) s.color = col.trim(); persistRoadmap(); renderRoadmap(); }
-function rmDelSection(sid) { if (!confirm('Delete this section and everything in it?')) return; roadmap.sections = roadmap.sections.filter(s => s.id !== sid); persistRoadmap(); renderRoadmap(); }
-function rmAddGroup(sid) { const s = rmFindSection(sid); if (!s) return; const name = prompt('Sub-section heading:'); if (name === null || !name.trim()) return; s.groups.push({ id: rmId(), name: name.trim(), lanes: [] }); persistRoadmap(); renderRoadmap(); }
-function rmEditGroup(sid, gid) { const s = rmFindSection(sid); const g = s && s.groups.find(x => x.id === gid); if (!g) return; const name = prompt('Sub-section heading:', g.name); if (name === null) return; g.name = name.trim(); persistRoadmap(); renderRoadmap(); }
-function rmDelGroup(sid, gid) { const s = rmFindSection(sid); if (!s) return; if (!confirm('Delete this sub-section and its lanes?')) return; s.groups = s.groups.filter(g => g.id !== gid); persistRoadmap(); renderRoadmap(); }
-function rmAddLaneToSection(sid) { const s = rmFindSection(sid); if (!s) return; if (!s.groups.length) s.groups.push({ id: rmId(), name: '', lanes: [] }); const g = s.groups[0]; const name = prompt('Swimlane name:'); if (name === null) return; g.lanes.push({ id: rmId(), name: name.trim(), bars: [] }); persistRoadmap(); renderRoadmap(); }
-function rmAddLane(sid, gid) { const s = rmFindSection(sid); const g = s && s.groups.find(x => x.id === gid); if (!g) return; const name = prompt('Swimlane name:'); if (name === null) return; g.lanes.push({ id: rmId(), name: name.trim(), bars: [] }); persistRoadmap(); renderRoadmap(); }
-function rmEditLane(sid, gid, lid) { const { ln } = rmFindBar(sid, gid, lid); if (!ln) return; const name = prompt('Swimlane name:', ln.name); if (name === null) return; ln.name = name.trim(); persistRoadmap(); renderRoadmap(); }
-function rmDelLane(sid, gid, lid) { const s = rmFindSection(sid); const g = s && s.groups.find(x => x.id === gid); if (!g) return; if (!confirm('Delete this swimlane?')) return; g.lanes = g.lanes.filter(l => l.id !== lid); persistRoadmap(); renderRoadmap(); }
+// ── Reusable in-app prompt modal (replaces native prompt()) ──
+let _uiCb = null;
+function uiCloseModal() { const w = document.getElementById('uiModalWrap'); if (w) w.remove(); _uiCb = null; }
+function uiModalSave() {
+  const cb = _uiCb; const vals = {};
+  document.querySelectorAll('#uiModalWrap [id^="ui_"]').forEach(el => { vals[el.id.slice(3)] = el.value; });
+  _uiCb = null; const w = document.getElementById('uiModalWrap'); if (w) w.remove();
+  if (cb) cb(vals);
+}
+function uiModal(title, fields, saveLabel, cb) {
+  _uiCb = cb;
+  const esc = s => String(s == null ? '' : s).replace(/"/g, '&quot;');
+  const body = fields.map(f => {
+    const lab = `<label style="display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:#64748B">${f.label}`;
+    if (f.type === 'select') { const o = (f.options || []).map(op => `<option value="${esc(op[0])}" ${op[0] === f.value ? 'selected' : ''}>${op[1]}</option>`).join(''); return `${lab}<select id="ui_${f.id}" style="padding:8px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:13px;color:#0F2544">${o}</select></label>`; }
+    if (f.type === 'color') return `${lab}<input id="ui_${f.id}" type="color" value="${esc(f.value || '#1F3864')}" style="width:100%;height:38px;border:1px solid #E2E8F0;border-radius:8px;cursor:pointer;background:#fff"></label>`;
+    return `${lab}<input id="ui_${f.id}" type="${f.type || 'text'}" value="${esc(f.value)}" placeholder="${esc(f.placeholder)}" style="padding:8px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:13px;color:#0F2544"></label>`;
+  }).join('');
+  uiCloseModal();
+  const wrap = document.createElement('div'); wrap.id = 'uiModalWrap';
+  wrap.style.cssText = 'position:fixed;inset:0;background:rgba(15,37,68,.45);z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px';
+  wrap.onclick = e => { if (e.target === wrap) uiCloseModal(); };
+  wrap.onkeydown = e => { if (e.key === 'Escape') uiCloseModal(); if (e.key === 'Enter' && e.target.tagName === 'INPUT') { e.preventDefault(); uiModalSave(); } };
+  wrap.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:440px;width:100%;box-shadow:0 20px 60px rgba(15,37,68,.3);padding:24px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><div style="font-size:17px;font-weight:800;color:#0F2544">${title}</div><button onclick="uiCloseModal()" style="border:none;background:none;font-size:22px;color:#CBD5E1;cursor:pointer">×</button></div>
+    <div style="display:flex;flex-direction:column;gap:12px">${body}</div>
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:22px"><button onclick="uiCloseModal()" style="background:#F1F5F9;color:#475569;border:none;padding:9px 16px;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px">Cancel</button><button onclick="uiModalSave()" style="background:#0F2544;color:#fff;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-weight:700;font-size:13px">${saveLabel || 'Save'}</button></div>
+  </div>`;
+  document.body.appendChild(wrap);
+  const first = wrap.querySelector('input,select'); if (first) first.focus();
+}
+function uiConfirm(title, message, onYes, yesLabel) {
+  uiCloseModal();
+  const wrap = document.createElement('div'); wrap.id = 'uiModalWrap';
+  wrap.style.cssText = 'position:fixed;inset:0;background:rgba(15,37,68,.45);z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px';
+  wrap.onclick = e => { if (e.target === wrap) uiCloseModal(); };
+  wrap.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:400px;width:100%;box-shadow:0 20px 60px rgba(15,37,68,.3);padding:24px">
+    <div style="font-size:16px;font-weight:800;color:#0F2544;margin-bottom:8px">${title}</div>
+    <div style="font-size:13px;color:#64748B;margin-bottom:20px">${message || ''}</div>
+    <div style="display:flex;justify-content:flex-end;gap:10px"><button onclick="uiCloseModal()" style="background:#F1F5F9;color:#475569;border:none;padding:9px 16px;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px">Cancel</button><button id="uiConfirmYes" style="background:#DC2626;color:#fff;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-weight:700;font-size:13px">${yesLabel || 'Delete'}</button></div>
+  </div>`;
+  document.body.appendChild(wrap);
+  document.getElementById('uiConfirmYes').onclick = () => { uiCloseModal(); if (onYes) onYes(); };
+}
+
+function rmAddSection() { uiModal('New section', [{ id: 'name', label: 'Section heading', placeholder: 'e.g. Track 1: Build & Test' }, { id: 'color', label: 'Colour', type: 'color', value: '#1F3864' }], 'Add section', v => { if (!v.name.trim()) return; roadmap.sections.push({ id: rmId(), name: v.name.trim(), color: v.color || '#1F3864', groups: [{ id: rmId(), name: '', lanes: [] }] }); persistRoadmap(); renderRoadmap(); }); }
+function rmEditSection(sid) { const s = rmFindSection(sid); if (!s) return; uiModal('Edit section', [{ id: 'name', label: 'Section heading', value: s.name }, { id: 'color', label: 'Colour', type: 'color', value: s.color || '#1F3864' }], 'Save', v => { s.name = v.name.trim(); if (v.color) s.color = v.color; persistRoadmap(); renderRoadmap(); }); }
+function rmDelSection(sid) { uiConfirm('Delete section', 'Delete this section and everything in it?', () => { roadmap.sections = roadmap.sections.filter(s => s.id !== sid); persistRoadmap(); renderRoadmap(); }); }
+function rmAddGroup(sid) { const s = rmFindSection(sid); if (!s) return; uiModal('New sub-section', [{ id: 'name', label: 'Sub-section heading', placeholder: 'e.g. Testing' }], 'Add', v => { if (!v.name.trim()) return; s.groups.push({ id: rmId(), name: v.name.trim(), lanes: [] }); persistRoadmap(); renderRoadmap(); }); }
+function rmEditGroup(sid, gid) { const s = rmFindSection(sid); const g = s && s.groups.find(x => x.id === gid); if (!g) return; uiModal('Edit sub-section', [{ id: 'name', label: 'Sub-section heading', value: g.name }], 'Save', v => { g.name = v.name.trim(); persistRoadmap(); renderRoadmap(); }); }
+function rmDelGroup(sid, gid) { const s = rmFindSection(sid); if (!s) return; uiConfirm('Delete sub-section', 'Delete this sub-section and its lanes?', () => { s.groups = s.groups.filter(g => g.id !== gid); persistRoadmap(); renderRoadmap(); }); }
+function rmAddLaneToSection(sid) { const s = rmFindSection(sid); if (!s) return; if (!s.groups.length) s.groups.push({ id: rmId(), name: '', lanes: [] }); const g = s.groups[0]; uiModal('New swimlane', [{ id: 'name', label: 'Swimlane name', placeholder: 'e.g. Build' }], 'Add', v => { if (v.name === '') return; g.lanes.push({ id: rmId(), name: v.name.trim(), bars: [] }); persistRoadmap(); renderRoadmap(); }); }
+function rmAddLane(sid, gid) { const s = rmFindSection(sid); const g = s && s.groups.find(x => x.id === gid); if (!g) return; uiModal('New swimlane', [{ id: 'name', label: 'Swimlane name', placeholder: 'e.g. SIT' }], 'Add', v => { if (v.name === '') return; g.lanes.push({ id: rmId(), name: v.name.trim(), bars: [] }); persistRoadmap(); renderRoadmap(); }); }
+function rmEditLane(sid, gid, lid) { const { ln } = rmFindBar(sid, gid, lid); if (!ln) return; uiModal('Rename swimlane', [{ id: 'name', label: 'Swimlane name', value: ln.name }], 'Save', v => { ln.name = v.name.trim(); persistRoadmap(); renderRoadmap(); }); }
+function rmDelLane(sid, gid, lid) { const s = rmFindSection(sid); const g = s && s.groups.find(x => x.id === gid); if (!g) return; uiConfirm('Delete swimlane', 'Delete this swimlane and its bars?', () => { g.lanes = g.lanes.filter(l => l.id !== lid); persistRoadmap(); renderRoadmap(); }); }
 
 let rmTarget = null;
 function rmCloseModal() { const w = document.getElementById('rmModalWrap'); if (w) w.remove(); }
@@ -4555,8 +4599,10 @@ function rmSaveMilestone(mid) {
 function rmDelMilestone(mid) { roadmap.milestones = roadmap.milestones.filter(m => m.id !== mid); persistRoadmap(); rmCloseModal(); renderRoadmap(); }
 
 function rmSeedGenesis() {
-  if (roadmap.sections.length && !confirm('Replace the current roadmap with the Genesis starter structure?')) return;
-  const mk = (mm, dd) => { const y = mm >= 6 ? 2026 : (mm <= 3 ? 2028 : 2027); return `${y}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`; };
+  if (roadmap.sections.length) { uiConfirm('Load Genesis starter', 'Replace the current roadmap with the Genesis starter structure?', rmDoSeed, 'Replace'); return; }
+  rmDoSeed();
+}
+function rmDoSeed() {
   roadmap = {
     sections: [
       { id: rmId(), name: 'Phases', color: '#C2410C', groups: [{ id: rmId(), name: '', lanes: [
@@ -4599,7 +4645,8 @@ function renderRoadmap() {
   const axis = GMONTHS.map(g => { const ms = Date.UTC(g.y, g.m, 1), me = Date.UTC(g.y, g.m + 1, 0); const w = ((me - ms) / 86400000 + 1) / GTOTAL * 100; const wk = Math.max(1, Math.round((me - GSTART) / (7 * 86400000))); return `<div style="width:${w}%;flex:none;text-align:center;padding:4px 0;border-right:1px solid #22375a;overflow:hidden;white-space:nowrap"><div style="font-size:10px;color:#cbd5e1">${g.label}</div><div style="font-size:8px;color:#7f93ad">W${wk}</div></div>`; }).join('');
 
   const mss = (roadmap.milestones || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-  const msHtml = mss.map((m, i) => { const l = rmPct(m.date); const tier = (i % 3) * 18; return `<div onclick="rmOpenMilestone(${m.id})" title="${String(m.label || '').replace(/"/g, '&quot;')} · ${m.date || ''}" style="position:absolute;left:${l}%;top:${tier}px;font-size:9.5px;color:#0F2544;cursor:pointer;white-space:nowrap"><span style="color:#EA580C;font-weight:800">▶</span> ${m.label || ''}</div><div style="position:absolute;left:${l}%;top:${tier + 12}px;bottom:0;width:1.5px;background:#F59E0B;opacity:.5"></div>`; }).join('');
+  const msH = 64;
+  const msHtml = mss.map((m, i) => { const l = rmPct(m.date); const tier = (i % 3) * 18; const lineH = msH - tier - 12; return `<div data-rmms data-mid="${m.id}" title="${String(m.label || '').replace(/"/g, '&quot;')} · ${m.date || ''} — drag to move, click to edit" style="position:absolute;left:${l}%;top:${tier}px;cursor:grab;user-select:none;white-space:nowrap"><div style="font-size:9.5px;color:#0F2544;pointer-events:none"><span style="color:#EA580C;font-weight:800">▶</span> ${m.label || ''}</div><div style="position:absolute;left:0;top:12px;width:1.5px;height:${lineH}px;background:#F59E0B;opacity:.5;pointer-events:none"></div><div class="rmms-date" style="display:none;position:absolute;left:0;top:-15px;font-size:9px;font-weight:700;color:#7c2d12;background:#FEF3C7;border:1px solid #FCD34D;padding:0 4px;border-radius:4px;pointer-events:none"></div></div>`; }).join('');
 
   let body = '', laneIdx = 0;
   roadmap.sections.forEach(s => {
@@ -4651,6 +4698,13 @@ function renderRoadmap() {
 function rmAddDays(iso, n) { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
 let rmDrag = null;
 function rmDragStart(e) {
+  const msEl = e.target.closest && e.target.closest('[data-rmms]');
+  if (msEl) {
+    const band = msEl.parentElement; if (!band) return;
+    const mid = +msEl.dataset.mid; const m = roadmap.milestones.find(x => x.id === mid); if (!m) return;
+    rmDrag = { mode: 'ms', el: msEl, bandW: band.getBoundingClientRect().width, startX: e.clientX, od: m.date, mid, moved: false, cur: null };
+    msEl.style.cursor = 'grabbing'; e.preventDefault(); return;
+  }
   const bar = e.target.closest && e.target.closest('[data-rmbar]'); if (!bar) return;
   const mode = e.target.getAttribute && e.target.getAttribute('data-rmh') || 'move';
   const track = bar.parentElement; if (!track) return;
@@ -4662,6 +4716,13 @@ function rmDragStart(e) {
 }
 function rmDragMove(e) {
   if (!rmDrag) return;
+  if (rmDrag.mode === 'ms') {
+    const dxm = e.clientX - rmDrag.startX; if (Math.abs(dxm) > 3) rmDrag.moved = true;
+    const dd = Math.round(dxm / rmDrag.bandW * GTOTAL); const nd = rmAddDays(rmDrag.od, dd); rmDrag.cur = { nd };
+    rmDrag.el.style.left = rmPct(nd) + '%';
+    const badge = rmDrag.el.querySelector('.rmms-date'); if (badge) { badge.style.display = 'block'; badge.textContent = nd; }
+    return;
+  }
   const dx = e.clientX - rmDrag.startX;
   if (Math.abs(dx) > 3) rmDrag.moved = true;
   const dd = Math.round(dx / rmDrag.trackW * GTOTAL);
@@ -4676,6 +4737,7 @@ function rmDragMove(e) {
 function rmDragEnd() {
   if (!rmDrag) return;
   const d = rmDrag; rmDrag = null;
+  if (d.mode === 'ms') { if (d.moved && d.cur) { const m = roadmap.milestones.find(x => x.id === d.mid); if (m) m.date = d.cur.nd; persistRoadmap(); renderRoadmap(); } else { rmOpenMilestone(d.mid); } return; }
   if (d.moved && d.cur) { const { b } = rmFindBar(d.sid, d.gid, d.lid, d.bid); if (b) { b.start = d.cur.ns; b.end = d.cur.ne; } persistRoadmap(); renderRoadmap(); }
   else { rmOpenBar(d.sid, d.gid, d.lid, d.bid); }   // no real drag ⇒ treat as click-to-edit
 }

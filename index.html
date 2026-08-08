@@ -4125,15 +4125,21 @@ function renderResourcingView() {
     return `<tr><td style="font-weight:600">${d}</td><td style="text-align:right;color:#64748B">${fmt(v.fe)}</td><td style="text-align:right;font-weight:700">${fmt(v.ae)}</td><td style="text-align:right;color:${col}">${dv > 0 ? '+' : ''}${Math.round(dv)} (${dp > 0 ? '+' : ''}${dp.toFixed(0)}%)</td><td style="text-align:right">${otc}</td><td style="text-align:right;color:#94A3B8">${fmt(v.f)}</td></tr>`;
   }).join('') || `<tr><td colspan="6" style="text-align:center;color:#94A3B8;padding:14px">No forecast yet.</td></tr>`;
 
+  const nowKey = new Date().toISOString().slice(0, 7);
   const activeCount = rows.filter(r => r.active !== false).length;
+  let etcTot = 0;
   const resList = rows.length ? rows.slice(0, 300).map((r, i) => {
-    let rf = 0, ra = 0, rot = 0; T.mk.forEach(mo => { if (!resActiveInMonth(r, mo.key)) return; rf += +((r.forecast || {})[mo.key] || 0); ra += +((r.actual || {})[mo.key] || 0); rot += +((r.overtime || {})[mo.key] || 0); });
+    let rf = 0, ra = 0, rot = 0, rfEl = 0; T.mk.forEach(mo => { if (!resActiveInMonth(r, mo.key)) return; const fv = +((r.forecast || {})[mo.key] || 0); rf += fv; if (mo.key <= nowKey) rfEl += fv; ra += +((r.actual || {})[mo.key] || 0); rot += +((r.overtime || {})[mo.key] || 0); });
+    const remain = Math.max(0, rf - rfEl);
+    const etc = r.etc != null ? r.etc : remain;
+    etcTot += etc;
+    const etcCell = `<span onclick="resEditETC(${i})" title="Click to set a revised Estimate to Complete — blank reverts to remaining forecast" style="cursor:pointer;border-bottom:1px dashed #CBD5E1">${fmt(etc)}${r.etc != null ? '<span style="color:#B45309"> *</span>' : ''}</span>`;
     const otCell = rot > 0 ? `<span title="Logged over 37.5 h/week" style="color:#B45309;font-weight:700">⚑ ${fmt(rot)}</span>` : `<span style="color:#CBD5E1">—</span>`;
     const off = r.active === false;
     const eff = off ? (r.inactiveFrom ? ' · from ' + String(r.inactiveFrom).slice(0, 7).replace('-', '/') : '') : (r.activeFrom ? ' · from ' + String(r.activeFrom).slice(0, 7).replace('-', '/') : '');
     const badge = `<button onclick="resToggleActive(${i})" title="Click to change status (asks for an effective date)" style="cursor:pointer;border:none;font-size:10px;font-weight:700;padding:3px 10px;border-radius:11px;${off ? 'background:#F1F5F9;color:#94A3B8' : 'background:#DCFCE7;color:#15803D'}">${off ? 'Inactive' : 'Active'}${eff}</button>`;
-    return `<tr style="${off ? 'opacity:.5' : ''}"><td style="font-weight:500">${r.name || '—'}</td><td style="color:#64748B">${r.role || ''}</td><td>${r.domain || ''}</td><td style="color:#64748B">${r.release || ''}</td><td style="text-align:right">${fmt(rf)}</td><td style="text-align:right;font-weight:600">${fmt(ra)}</td><td style="text-align:right">${otCell}</td><td style="text-align:center">${badge}</td><td style="text-align:center"><button onclick="resDeleteRow(${i})" title="Remove" style="border:none;background:none;color:#CBD5E1;cursor:pointer;font-size:16px;line-height:1" onmouseover="this.style.color='#DC2626'" onmouseout="this.style.color='#CBD5E1'">×</button></td></tr>`;
-  }).join('') : `<tr><td colspan="9" style="text-align:center;color:#94A3B8;padding:18px">No resources yet — <strong>Import forecast</strong> or <strong>Add resource</strong>.</td></tr>`;
+    return `<tr style="${off ? 'opacity:.5' : ''}"><td style="font-weight:500">${r.name || '—'}</td><td style="color:#64748B">${r.role || ''}</td><td>${r.domain || ''}</td><td style="color:#64748B">${r.release || ''}</td><td style="text-align:right">${fmt(rf)}</td><td style="text-align:right;font-weight:600">${fmt(ra)}</td><td style="text-align:right">${etcCell}</td><td style="text-align:right">${otCell}</td><td style="text-align:center">${badge}</td><td style="text-align:center"><button onclick="resDeleteRow(${i})" title="Remove" style="border:none;background:none;color:#CBD5E1;cursor:pointer;font-size:16px;line-height:1" onmouseover="this.style.color='#DC2626'" onmouseout="this.style.color='#CBD5E1'">×</button></td></tr>`;
+  }).join('') : `<tr><td colspan="10" style="text-align:center;color:#94A3B8;padding:18px">No resources yet — <strong>Import forecast</strong> or <strong>Add resource</strong>.</td></tr>`;
 
   document.getElementById('resourcingView').innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px">
@@ -4150,6 +4156,8 @@ function renderResourcingView() {
       ${kpi('Forecast (total)', fmt(T.fTot), 'man-days in window', '#0F2544')}
       ${kpi('Actual to date', fmt(T.aEl), 'of ' + fmt(T.fEl) + ' planned (elapsed)', '#2563EB')}
       ${kpi('Variance to date', (varPct > 0 ? '+' : '') + varPct.toFixed(1) + '%', Math.round(varE) + ' md vs plan', Math.abs(varPct) < 5 ? '#0F2544' : varPct > 0 ? '#B45309' : '#0F766E')}
+      ${kpi('Estimate to complete', fmt(etcTot), 'man-days remaining to finish', '#0F2544')}
+      ${kpi('Est. at completion', fmt(T.aEl + etcTot), (T.aEl + etcTot - T.fTot >= 0 ? '+' : '') + Math.round(T.aEl + etcTot - T.fTot) + ' vs baseline ' + fmt(T.fTot), (T.aEl + etcTot) > T.fTot * 1.02 ? '#B45309' : '#0F766E')}
       ${kpi('Active resources', activeCount, 'of ' + rows.length + ' total' + (rows.length - activeCount ? ' · ' + (rows.length - activeCount) + ' inactive' : ''), '#0F2544')}
     </div>
     <div class="res-card" style="border-radius:14px"><div class="res-card-title">Forecast vs Actual by month
@@ -4157,7 +4165,7 @@ function renderResourcingView() {
     <div class="res-card" style="border-radius:14px"><div class="res-card-title">By domain — elapsed period</div>
       <table class="dtable"><thead><tr><th>Domain</th><th style="text-align:right">Forecast</th><th style="text-align:right">Actual</th><th style="text-align:right">Variance</th><th style="text-align:right">OT</th><th style="text-align:right">Full FC</th></tr></thead><tbody>${domRows}</tbody></table></div>
     <div class="res-card" style="border-radius:14px"><div class="res-card-title">Resources <span class="res-hint">imported or added manually</span></div>
-      <table class="dtable"><thead><tr><th>Name</th><th>Role</th><th>Domain</th><th>Release</th><th style="text-align:right">FC md</th><th style="text-align:right">Act md</th><th style="text-align:right">OT</th><th style="text-align:center">Status</th><th></th></tr></thead><tbody>${resList}</tbody></table></div>`;
+      <table class="dtable"><thead><tr><th>Name</th><th>Role</th><th>Domain</th><th>Release</th><th style="text-align:right">FC md</th><th style="text-align:right">Act md</th><th style="text-align:right">ETC</th><th style="text-align:right">OT</th><th style="text-align:center">Status</th><th></th></tr></thead><tbody>${resList}</tbody></table></div>`;
 }
 function resToggleActive(i) {
   const r = resourcing.rows[i]; if (!r) return;
@@ -4171,6 +4179,15 @@ function resToggleActive(i) {
     if (d === null) return;
     r.active = false; r.inactiveFrom = (d || '').trim();
   }
+  persistResourcing(); renderResourcingView();
+}
+function resEditETC(i) {
+  const r = resourcing.rows[i]; if (!r) return;
+  const cur = r.etc != null ? r.etc : '';
+  const v = prompt('Estimate to Complete for ' + (r.name || 'this resource') + ' (man-days remaining).\nLeave blank to use remaining forecast:', cur);
+  if (v === null) return;
+  const t = String(v).trim();
+  if (t === '') { delete r.etc; } else { const n = parseFloat(t); if (!isNaN(n)) r.etc = n; }
   persistResourcing(); renderResourcingView();
 }
 function resDeleteRow(i) { resourcing.rows.splice(i, 1); persistResourcing(); renderResourcingView(); }

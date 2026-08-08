@@ -4575,6 +4575,23 @@ function rmAddLaneToSection(sid) { const s = rmFindSection(sid); if (!s) return;
 function rmAddLane(sid, gid) { const s = rmFindSection(sid); const g = s && s.groups.find(x => x.id === gid); if (!g) return; uiModal('New swimlane', [{ id: 'name', label: 'Swimlane name', placeholder: 'e.g. SIT' }], 'Add', v => { if (v.name === '') return; g.lanes.push({ id: rmId(), name: v.name.trim(), bars: [] }); persistRoadmap(); renderRoadmap(); }); }
 function rmEditLane(sid, gid, lid) { const { ln } = rmFindBar(sid, gid, lid); if (!ln) return; uiModal('Rename swimlane', [{ id: 'name', label: 'Swimlane name', value: ln.name }], 'Save', v => { ln.name = v.name.trim(); persistRoadmap(); renderRoadmap(); }); }
 function rmDelLane(sid, gid, lid) { const s = rmFindSection(sid); const g = s && s.groups.find(x => x.id === gid); if (!g) return; uiConfirm('Delete swimlane', 'Delete this swimlane and its bars?', () => { g.lanes = g.lanes.filter(l => l.id !== lid); persistRoadmap(); renderRoadmap(); }); }
+function rmMoveSection(sid, dir) {
+  const i = roadmap.sections.findIndex(s => s.id === sid); const j = i + dir;
+  if (i < 0 || j < 0 || j >= roadmap.sections.length) return;
+  const t = roadmap.sections[i]; roadmap.sections[i] = roadmap.sections[j]; roadmap.sections[j] = t;
+  persistRoadmap(); renderRoadmap();
+}
+/** Move a swimlane up/down through the full ordered list — crosses sub-section and track boundaries. */
+function rmMoveLane(lid, dir) {
+  const flat = []; roadmap.sections.forEach(s => s.groups.forEach(g => g.lanes.forEach(ln => flat.push({ g, ln }))));
+  const i = flat.findIndex(x => x.ln.id === lid); if (i < 0) return;
+  const j = i + dir; if (j < 0 || j >= flat.length) return;
+  const cur = flat[i], nb = flat[j];
+  cur.g.lanes.splice(cur.g.lanes.indexOf(cur.ln), 1);
+  if (nb.g === cur.g) { const ni = nb.g.lanes.indexOf(nb.ln); nb.g.lanes.splice(dir < 0 ? ni : ni + 1, 0, cur.ln); }
+  else { if (dir < 0) nb.g.lanes.push(cur.ln); else nb.g.lanes.unshift(cur.ln); }
+  persistRoadmap(); renderRoadmap();
+}
 
 let rmTarget = null;
 function rmAddBar(sid, gid, lid) { rmOpenBar(sid, gid, lid); }   // + on a lane → new-bar modal
@@ -4703,13 +4720,13 @@ function renderRoadmap() {
   roadmap.sections.forEach(s => {
     body += `<div style="display:flex;align-items:center;background:${s.color || '#1F3864'};color:#fff;font-size:11px;font-weight:800;padding:5px 8px">
       <div style="flex:1;cursor:pointer" onclick="rmEditSection(${s.id})" title="Click to rename this section">${s.name || 'Section'}</div>
-      ${btn(`rmAddLaneToSection(${s.id})`, '+ Lane')}${btn(`rmAddGroup(${s.id})`, '+ Sub-section')}${btn(`rmEditSection(${s.id})`, '✎ Rename')}${btn(`rmDelSection(${s.id})`, '×')}</div>`;
+      ${btn(`rmMoveSection(${s.id},-1)`, '▲')}${btn(`rmMoveSection(${s.id},1)`, '▼')}${btn(`rmAddLaneToSection(${s.id})`, '+ Lane')}${btn(`rmAddGroup(${s.id})`, '+ Sub-section')}${btn(`rmEditSection(${s.id})`, '✎ Rename')}${btn(`rmDelSection(${s.id})`, '×')}</div>`;
     (s.groups || []).forEach(g => {
       if (g.name) body += `<div style="display:flex;align-items:center;background:#EEF2F7;color:#334155;font-size:10.5px;font-weight:700;padding:3px 8px 3px 18px"><div style="flex:1;cursor:pointer" onclick="rmEditGroup(${s.id},${g.id})" title="Click to rename this sub-section">${g.name}</div>${laneBtn(`rmAddLane(${s.id},${g.id})`, '+ Lane')} <span style="width:5px"></span>${laneBtn(`rmEditGroup(${s.id},${g.id})`, '✎')}${laneBtn(`rmDelGroup(${s.id},${g.id})`, '×', '#DC2626')}</div>`;
       (g.lanes || []).forEach(ln => {
         const bars = (ln.bars || []).map(b => { const l = rmPct(b.start), w = Math.max(0.6, rmPct(b.end) - rmPct(b.start)); return `<div data-rmbar data-sid="${s.id}" data-gid="${g.id}" data-lid="${ln.id}" data-bid="${b.id}" title="${String(b.label || '').replace(/"/g, '&quot;')} (${rmFmtDate(b.start)} → ${rmFmtDate(b.end)}) — drag to move, edges to resize, click to edit" style="position:absolute;top:4px;left:${l}%;width:${w}%;height:16px;background:${b.color || rmCatColor(b.cat)};border-radius:3px;color:#fff;font-size:9px;font-weight:700;line-height:16px;overflow:hidden;white-space:nowrap;cursor:grab;user-select:none"><span data-rmh="l" style="position:absolute;left:0;top:0;bottom:0;width:6px;cursor:col-resize"></span><span style="display:block;padding:0 7px;pointer-events:none;overflow:hidden;text-overflow:ellipsis">${b.label || ''}</span><span data-rmh="r" style="position:absolute;right:0;top:0;bottom:0;width:6px;cursor:col-resize"></span></div>`; }).join('');
         body += `<div style="display:flex;border-bottom:1px solid #EEF2F7;min-height:26px">
-          <div style="width:${LBL}px;flex:none;display:flex;align-items:center;gap:5px;padding:0 8px;font-size:11px;color:#334155;background:#F8FAFC;border-right:1px solid #E2E8F0"><span onclick="rmEditLane(${s.id},${g.id},${ln.id})" title="Rename" style="cursor:pointer;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${ln.name || 'Lane'}</span>${laneBtn(`rmAddBar(${s.id},${g.id},${ln.id})`, '+', '#2563EB')}${laneBtn(`rmDelLane(${s.id},${g.id},${ln.id})`, '×', '#DC2626')}</div>
+          <div style="width:${LBL}px;flex:none;display:flex;align-items:center;gap:5px;padding:0 8px;font-size:11px;color:#334155;background:#F8FAFC;border-right:1px solid #E2E8F0"><span onclick="rmEditLane(${s.id},${g.id},${ln.id})" title="Rename" style="cursor:pointer;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${ln.name || 'Lane'}</span>${laneBtn(`rmMoveLane(${ln.id},-1)`, '▲')}${laneBtn(`rmMoveLane(${ln.id},1)`, '▼')}${laneBtn(`rmAddBar(${s.id},${g.id},${ln.id})`, '+', '#2563EB')}${laneBtn(`rmDelLane(${s.id},${g.id},${ln.id})`, '×', '#DC2626')}</div>
           <div style="flex:1;position:relative;background:${(laneIdx++ % 2) ? '#FAFBFC' : '#fff'}">${todayPct > 0 && todayPct < 100 ? `<div style="position:absolute;top:0;bottom:0;left:${todayPct}%;width:2px;background:#EF4444;z-index:3"></div>` : ''}${bars}</div>
         </div>`;
       });

@@ -4081,8 +4081,13 @@ function isGenesis() { return ORG === 'GENESIS'; }
 function resMonths() {
   return GMONTHS.map(g => ({ key: g.y + '-' + String(g.m + 1).padStart(2, '0'), label: g.label }));
 }
-/** Effective-dated active check: excludes months on/after inactiveFrom, and before activeFrom. */
-function resActiveInMonth(r, key) {
+/** Forecast counts wherever planned, up to (not including) the end date. Start date does NOT gate forecast. */
+function resFcInMonth(r, key) {
+  if (r.inactiveFrom && key >= String(r.inactiveFrom).slice(0, 7)) return false;
+  return true;
+}
+/** Actuals count only within the active window — from the start date up to (not including) the end date. */
+function resAcInMonth(r, key) {
   if (r.activeFrom && key < String(r.activeFrom).slice(0, 7)) return false;
   if (r.inactiveFrom && key >= String(r.inactiveFrom).slice(0, 7)) return false;
   return true;
@@ -4181,8 +4186,11 @@ function resTotals() {
   const byDom = {};
   (resourcing.rows || []).forEach(r => {
     mk.forEach(mo => {
-      if (!resActiveInMonth(r, mo.key)) return;     // effective-dated active/inactive
-      const f = +((r.forecast || {})[mo.key] || 0), a = +((r.actual || {})[mo.key] || 0), o = +((r.overtime || {})[mo.key] || 0);
+      const fcOK = resFcInMonth(r, mo.key), acOK = resAcInMonth(r, mo.key);
+      if (!fcOK && !acOK) return;
+      const f = fcOK ? +((r.forecast || {})[mo.key] || 0) : 0;
+      const a = acOK ? +((r.actual || {})[mo.key] || 0) : 0;
+      const o = acOK ? +((r.overtime || {})[mo.key] || 0) : 0;
       fTot += f; aTot += a;
       const el = mo.key <= nowKey;
       if (el) { fEl += f; aEl += a; }
@@ -4199,7 +4207,7 @@ function renderResourcingView() {
   const varE = T.aEl - T.fEl, varPct = T.fEl > 0 ? varE / T.fEl * 100 : 0;
   const kpi = (l, v, s, c) => `<div style="background:#fff;border:1px solid #EEF1F6;border-radius:14px;padding:16px 18px;flex:1;min-width:150px;box-shadow:0 1px 2px rgba(15,37,68,.04)"><div style="font-size:10.5px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:.6px">${l}</div><div style="font-size:26px;font-weight:800;color:${c || '#0F2544'};margin-top:6px;letter-spacing:-.01em">${v}</div><div style="font-size:11px;color:#64748B;margin-top:5px">${s}</div></div>`;
 
-  const monthly = T.mk.map(mo => { let f = 0, a = 0; rows.forEach(r => { if (!resActiveInMonth(r, mo.key)) return; f += +((r.forecast || {})[mo.key] || 0); a += +((r.actual || {})[mo.key] || 0); }); return { mo, f, a }; });
+  const monthly = T.mk.map(mo => { let f = 0, a = 0; rows.forEach(r => { if (resFcInMonth(r, mo.key)) f += +((r.forecast || {})[mo.key] || 0); if (resAcInMonth(r, mo.key)) a += +((r.actual || {})[mo.key] || 0); }); return { mo, f, a }; });
   const maxV = Math.max(1, ...monthly.map(x => Math.max(x.f, x.a)));
   const bars = `<div style="display:flex;align-items:flex-end;gap:10px;height:158px;margin-top:10px">${monthly.map(x => {
     const fh = x.f / maxV * 124, ah = x.a / maxV * 124;
@@ -4216,7 +4224,7 @@ function renderResourcingView() {
   const activeCount = rows.filter(r => r.active !== false).length;
   let etcTot = 0;
   const metrics = rows.map((r, idx) => {
-    let rf = 0, ra = 0, rot = 0, rfEl = 0; T.mk.forEach(mo => { if (!resActiveInMonth(r, mo.key)) return; const fv = +((r.forecast || {})[mo.key] || 0); rf += fv; if (mo.key <= nowKey) rfEl += fv; ra += +((r.actual || {})[mo.key] || 0); rot += +((r.overtime || {})[mo.key] || 0); });
+    let rf = 0, ra = 0, rot = 0, rfEl = 0; T.mk.forEach(mo => { if (resFcInMonth(r, mo.key)) { const fv = +((r.forecast || {})[mo.key] || 0); rf += fv; if (mo.key <= nowKey) rfEl += fv; } if (resAcInMonth(r, mo.key)) { ra += +((r.actual || {})[mo.key] || 0); rot += +((r.overtime || {})[mo.key] || 0); } });
     const etc = r.etc != null ? r.etc : Math.max(0, rf - rfEl);
     etcTot += etc;
     return { r, idx, rf, ra, rot, etc, active: r.active !== false };

@@ -4118,6 +4118,53 @@ let resExpanded = new Set();
 function resToggleExpand(id) { if (resExpanded.has(id)) resExpanded.delete(id); else resExpanded.add(id); renderResourcingView(); }
 let resSort = { key: 'name', dir: 'asc' };
 function resSetSort(k) { if (resSort.key === k) { resSort.dir = resSort.dir === 'asc' ? 'desc' : 'asc'; } else { resSort.key = k; resSort.dir = (k === 'name' || k === 'role' || k === 'domain' || k === 'release') ? 'asc' : 'desc'; } renderResourcingView(); }
+// ── Multi-select + bulk update ──
+let resSelected = new Set();
+function resToggleSel(id, checked) { if (checked) resSelected.add(id); else resSelected.delete(id); renderResourcingView(); }
+function resSelectAll(checked) { if (checked) (resourcing.rows || []).forEach(r => resSelected.add(r.id)); else resSelected.clear(); renderResourcingView(); }
+function resClearSel() { resSelected.clear(); renderResourcingView(); }
+function resOpenBulk() {
+  const ids = [...resSelected]; if (!ids.length) { alert('Select one or more resources first (tick the boxes).'); return; }
+  resCloseDetail();
+  const fld = (label, id, type, ph) => `<label style="display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:#64748B">${label}<input id="${id}" type="${type || 'text'}" placeholder="${ph || 'leave blank = no change'}" style="padding:8px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:13px;color:#0F2544"></label>`;
+  const wrap = document.createElement('div');
+  wrap.id = 'resModalWrap';
+  wrap.style.cssText = 'position:fixed;inset:0;background:rgba(15,37,68,.45);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px';
+  wrap.onclick = e => { if (e.target === wrap) resCloseDetail(); };
+  wrap.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:540px;width:100%;box-shadow:0 20px 60px rgba(15,37,68,.3);padding:24px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <div style="font-size:18px;font-weight:800;color:#0F2544">Bulk update</div>
+      <button onclick="resCloseDetail()" style="border:none;background:none;font-size:22px;color:#CBD5E1;cursor:pointer;line-height:1">×</button>
+    </div>
+    <div style="font-size:12px;color:#64748B;margin-bottom:16px">Applying to <strong>${ids.length}</strong> selected resource${ids.length > 1 ? 's' : ''}. Only the fields you fill in will change; blanks are left as-is.</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      ${fld('Title / role', 'bkRole')}
+      ${fld('Area / domain', 'bkDom')}
+      ${fld('Release', 'bkRel', 'text', 'e.g. R2.0 / R2.1 / R2.2')}
+      ${fld('Location', 'bkLoc')}
+      ${fld('Start date', 'bkStart', 'date')}
+      ${fld('End date', 'bkEnd', 'date')}
+      <label style="grid-column:1/3;display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:#64748B">Status<select id="bkStatus" style="padding:8px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:13px;color:#0F2544"><option value="">— no change —</option><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:22px">
+      <button onclick="resCloseDetail()" style="background:#F1F5F9;color:#475569;border:none;padding:9px 16px;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px">Cancel</button>
+      <button onclick="resApplyBulk()" style="background:#0F2544;color:#fff;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-weight:700;font-size:13px">Apply to ${ids.length}</button>
+    </div>
+  </div>`;
+  document.body.appendChild(wrap);
+}
+function resApplyBulk() {
+  const g = id => { const el = document.getElementById(id); return el ? el.value : ''; };
+  const role = g('bkRole').trim(), dom = g('bkDom').trim(), rel = g('bkRel').trim(), loc = g('bkLoc').trim();
+  const start = g('bkStart').trim(), end = g('bkEnd').trim(), status = g('bkStatus');
+  [...resSelected].forEach(id => {
+    const r = (resourcing.rows || []).find(x => x.id === id); if (!r) return;
+    if (role) r.role = role; if (dom) r.domain = dom; if (rel) r.release = rel; if (loc) r.location = loc;
+    if (start) r.activeFrom = start; if (end) r.inactiveFrom = end;
+    if (status === 'active') r.active = true; else if (status === 'inactive') r.active = false;
+  });
+  persistResourcing(); resCloseDetail(); renderResourcingView();
+}
 function resSetWeek(id, wk, val) {
   const r = (resourcing.rows || []).find(x => x.id === id); if (!r) return;
   r.forecastWk = r.forecastWk || {};
@@ -4184,8 +4231,8 @@ function renderResourcingView() {
     const eff = off ? (r.inactiveFrom ? ' · from ' + String(r.inactiveFrom).slice(0, 7).replace('-', '/') : '') : (r.activeFrom ? ' · from ' + String(r.activeFrom).slice(0, 7).replace('-', '/') : '');
     const badge = `<button onclick="resToggleActive(${i})" title="Click to change status (asks for an effective date)" style="cursor:pointer;border:none;font-size:10px;font-weight:700;padding:3px 10px;border-radius:11px;${off ? 'background:#F1F5F9;color:#94A3B8' : 'background:#DCFCE7;color:#15803D'}">${off ? 'Inactive' : 'Active'}${eff}</button>`;
     const open = resExpanded.has(r.id);
-    const caret = `<span onclick="resToggleExpand(${r.id})" title="Weekly forecast entry" style="cursor:pointer;color:#94A3B8;margin-right:7px;font-size:11px;user-select:none">${open ? '▾' : '▸'}</span>`;
-    const mainRow = `<tr style="${off ? 'opacity:.5' : ''}"><td style="font-weight:500">${caret}<span onclick="resOpenDetail(${i})" title="Open resource details" style="cursor:pointer;border-bottom:1px dotted transparent" onmouseover="this.style.borderBottomColor='#94A3B8'" onmouseout="this.style.borderBottomColor='transparent'">${r.name || '—'}</span></td><td style="color:#64748B">${r.role || ''}</td><td>${r.domain || ''}</td><td style="color:#64748B">${r.release || ''}</td><td style="text-align:right">${fmt(rf)}</td><td style="text-align:right;font-weight:600">${fmt(ra)}</td><td style="text-align:right">${etcCell}</td><td style="text-align:right">${otCell}</td><td style="text-align:center">${badge}</td><td style="text-align:center"><button onclick="resDeleteRow(${i})" title="Remove" style="border:none;background:none;color:#CBD5E1;cursor:pointer;font-size:16px;line-height:1" onmouseover="this.style.color='#DC2626'" onmouseout="this.style.color='#CBD5E1'">×</button></td></tr>`;
+    const caret = `<button onclick="resToggleExpand(${r.id})" title="Enter weekly forecast hours" style="cursor:pointer;border:1px solid ${open ? '#2563EB' : '#E2E8F0'};background:${open ? '#EFF6FF' : '#fff'};color:${open ? '#2563EB' : '#64748B'};margin-right:8px;font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:9px;user-select:none;vertical-align:middle">${open ? '▾' : '▸'} Weekly</button>`;
+    const mainRow = `<tr style="${off ? 'opacity:.5' : ''}"><td style="text-align:center"><input type="checkbox" onclick="resToggleSel(${r.id},this.checked)" ${resSelected.has(r.id) ? 'checked' : ''} style="cursor:pointer"></td><td style="font-weight:500">${caret}<span onclick="resOpenDetail(${i})" title="Open resource details" style="cursor:pointer;border-bottom:1px dotted transparent" onmouseover="this.style.borderBottomColor='#94A3B8'" onmouseout="this.style.borderBottomColor='transparent'">${r.name || '—'}</span></td><td style="color:#64748B">${r.role || ''}</td><td>${r.domain || ''}</td><td style="color:#64748B">${r.release || ''}</td><td style="text-align:right">${fmt(rf)}</td><td style="text-align:right;font-weight:600">${fmt(ra)}</td><td style="text-align:right">${etcCell}</td><td style="text-align:right">${otCell}</td><td style="text-align:center">${badge}</td><td style="text-align:center"><button onclick="resDeleteRow(${i})" title="Remove" style="border:none;background:none;color:#CBD5E1;cursor:pointer;font-size:16px;line-height:1" onmouseover="this.style.color='#DC2626'" onmouseout="this.style.color='#CBD5E1'">×</button></td></tr>`;
     let detail = '';
     if (open) {
       const WK = resWeeks(), byMo = {};
@@ -4203,10 +4250,10 @@ function renderResourcingView() {
         let am = 0; wks.forEach(w => { const aw = (r.actualWk || {})[w.key]; if (aw != null) am += (+aw || 0); }); am = +(am / 7.5).toFixed(2);
         return `<div style="border:1px solid #E2E8F0;border-radius:8px;padding:8px 9px;background:#fff"><div style="font-size:10px;font-weight:700;color:#0F2544;margin-bottom:6px">${mo.label} · <span style="color:#2563EB">F ${fmt(md)}</span> · <span style="color:#0F766E">A ${fmt(am)}</span> md</div><div style="display:flex;gap:8px;flex-wrap:wrap">${inputs}</div></div>`;
       }).join('');
-      detail = `<tr><td colspan="10" style="background:#F8FAFC;padding:12px 16px"><div style="font-size:11px;color:#64748B;margin-bottom:9px">✎ Week-by-week (W/C Mon) — box = <strong style="color:#2563EB">Forecast</strong> hours (editable), <strong style="color:#0F766E">A</strong> = <strong style="color:#0F766E">Actual</strong> hours from timesheets. Each month totals to man-days at 37.5 h/week; months left blank keep their imported forecast.</div><div style="display:flex;gap:12px;flex-wrap:wrap">${blocks}</div></td></tr>`;
+      detail = `<tr><td colspan="11" style="background:#F8FAFC;padding:12px 16px"><div style="font-size:11px;color:#64748B;margin-bottom:9px">✎ Week-by-week (W/C Mon) — box = <strong style="color:#2563EB">Forecast</strong> hours (editable), <strong style="color:#0F766E">A</strong> = <strong style="color:#0F766E">Actual</strong> hours from timesheets. Each month totals to man-days at 37.5 h/week; months left blank keep their imported forecast.</div><div style="display:flex;gap:12px;flex-wrap:wrap">${blocks}</div></td></tr>`;
     }
     return mainRow + detail;
-  }).join('') : `<tr><td colspan="10" style="text-align:center;color:#94A3B8;padding:18px">No resources yet — <strong>Import forecast</strong> or <strong>Add resource</strong>.</td></tr>`;
+  }).join('') : `<tr><td colspan="11" style="text-align:center;color:#94A3B8;padding:18px">No resources yet — <strong>Import forecast</strong> or <strong>Add resource</strong>.</td></tr>`;
 
   const sTh = (label, key, align) => `<th onclick="resSetSort('${key}')" title="Sort by ${label}" style="cursor:pointer;user-select:none;white-space:nowrap;text-align:${align || 'left'}">${label}${resSort.key === key ? `<span style="color:#2563EB"> ${resSort.dir === 'asc' ? '▲' : '▼'}</span>` : '<span style="color:#CBD5E1"> ↕</span>'}</th>`;
   document.getElementById('resourcingView').innerHTML = `
@@ -4232,8 +4279,8 @@ function renderResourcingView() {
       <span class="res-hint">grey = forecast · blue = actual (timesheet upload)</span></div>${bars}</div>
     <div class="res-card" style="border-radius:14px"><div class="res-card-title">By domain — elapsed period</div>
       <table class="dtable"><thead><tr><th>Domain</th><th style="text-align:right">Forecast</th><th style="text-align:right">Actual</th><th style="text-align:right">Variance</th><th style="text-align:right">OT</th><th style="text-align:right">Full FC</th></tr></thead><tbody>${domRows}</tbody></table></div>
-    <div class="res-card" style="border-radius:14px"><div class="res-card-title">Resources <span class="res-hint">imported or added manually</span></div>
-      <table class="dtable"><thead><tr>${sTh('Name', 'name')}${sTh('Role', 'role')}${sTh('Domain', 'domain')}${sTh('Release', 'release')}${sTh('FC md', 'fc', 'right')}${sTh('Act md', 'act', 'right')}${sTh('ETC', 'etc', 'right')}${sTh('OT', 'ot', 'right')}${sTh('Status', 'status', 'center')}<th></th></tr></thead><tbody>${resList}</tbody></table></div>`;
+    <div class="res-card" style="border-radius:14px"><div class="res-card-title">Resources <span class="res-hint">click a name to edit · <span style="color:#2563EB">▸ Weekly</span> to enter forecast hours by week</span>${resSelected.size ? `<span style="float:right;display:inline-flex;align-items:center;gap:8px;font-size:12px"><span style="color:#0F2544;font-weight:700">${resSelected.size} selected</span><button onclick="resOpenBulk()" style="background:#0F2544;color:#fff;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-weight:600;font-size:11px">Bulk update</button><button onclick="resClearSel()" style="background:#F1F5F9;color:#475569;border:none;padding:5px 10px;border-radius:8px;cursor:pointer;font-size:11px">Clear</button></span>` : ''}</div>
+      <table class="dtable"><thead><tr><th style="text-align:center"><input type="checkbox" onclick="resSelectAll(this.checked)" ${rows.length && rows.every(r => resSelected.has(r.id)) ? 'checked' : ''} title="Select all" style="cursor:pointer"></th>${sTh('Name', 'name')}${sTh('Role', 'role')}${sTh('Domain', 'domain')}${sTh('Release', 'release')}${sTh('FC md', 'fc', 'right')}${sTh('Act md', 'act', 'right')}${sTh('ETC', 'etc', 'right')}${sTh('OT', 'ot', 'right')}${sTh('Status', 'status', 'center')}<th></th></tr></thead><tbody>${resList}</tbody></table></div>`;
 }
 function resToggleActive(i) {
   const r = resourcing.rows[i]; if (!r) return;

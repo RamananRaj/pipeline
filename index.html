@@ -4239,7 +4239,7 @@ function _resMapImport(arr, mode) {
     dcols.forEach(([ci, d]) => {
       const v = row[ci]; const num = typeof v === 'number' ? v : parseFloat(v); if (isNaN(num)) return;
       const k = monthOf(d);
-      if (weekly) { acc[k] = (acc[k] || 0) + Math.min(num, WEEK_CAP); const ot = Math.max(0, num - WEEK_CAP); if (ot > 0) { accOT[k] = (accOT[k] || 0) + ot; otAny = true; } }
+      if (weekly) { acc[k] = (acc[k] || 0) + num; const ot = Math.max(0, num - WEEK_CAP); if (ot > 0) { accOT[k] = (accOT[k] || 0) + ot; otAny = true; } }
       else { acc[k] = (acc[k] || 0) + num; }
     });
     Object.keys(acc).forEach(k => { rec[field][k] = weekly ? +(acc[k] / HRS_PER_DAY).toFixed(2) : acc[k]; });
@@ -4247,7 +4247,7 @@ function _resMapImport(arr, mode) {
     n++;
   }
   persistResourcing(); renderResourcingView();
-  alert('Imported ' + n + ' rows into "' + field + '"' + (weekly ? ' — weekly hours rolled up to man-days (37.5 h/week = 5 days).' + (otAny ? ' Hours over 37.5/week captured separately as overtime.' : '') : '.'));
+  alert('Imported ' + n + ' rows into "' + field + '"' + (weekly ? ' — weekly hours rolled up to man-days (37.5 h/week = 5 days).' + (otAny ? ' Hours over 37.5/week are included in Actual and flagged as overtime.' : '') : '.'));
 }
 
 function applyInternalMode() {

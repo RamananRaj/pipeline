@@ -4081,14 +4081,20 @@ function isGenesis() { return ORG === 'GENESIS'; }
 function resMonths() {
   return GMONTHS.map(g => ({ key: g.y + '-' + String(g.m + 1).padStart(2, '0'), label: g.label }));
 }
+/** Effective-dated active check: excludes months on/after inactiveFrom, and before activeFrom. */
+function resActiveInMonth(r, key) {
+  if (r.activeFrom && key < String(r.activeFrom).slice(0, 7)) return false;
+  if (r.inactiveFrom && key >= String(r.inactiveFrom).slice(0, 7)) return false;
+  return true;
+}
 function resTotals() {
   const mk = resMonths();
   const nowKey = new Date().toISOString().slice(0, 7);
   let fTot = 0, aTot = 0, fEl = 0, aEl = 0;
   const byDom = {};
   (resourcing.rows || []).forEach(r => {
-    if (r.active === false) return;                 // inactive resources excluded from totals
     mk.forEach(mo => {
+      if (!resActiveInMonth(r, mo.key)) return;     // effective-dated active/inactive
       const f = +((r.forecast || {})[mo.key] || 0), a = +((r.actual || {})[mo.key] || 0);
       fTot += f; aTot += a;
       const el = mo.key <= nowKey;
@@ -4106,7 +4112,7 @@ function renderResourcingView() {
   const varE = T.aEl - T.fEl, varPct = T.fEl > 0 ? varE / T.fEl * 100 : 0;
   const kpi = (l, v, s, c) => `<div style="background:#fff;border:1px solid #EEF1F6;border-radius:14px;padding:16px 18px;flex:1;min-width:150px;box-shadow:0 1px 2px rgba(15,37,68,.04)"><div style="font-size:10.5px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:.6px">${l}</div><div style="font-size:26px;font-weight:800;color:${c || '#0F2544'};margin-top:6px;letter-spacing:-.01em">${v}</div><div style="font-size:11px;color:#64748B;margin-top:5px">${s}</div></div>`;
 
-  const monthly = T.mk.map(mo => { let f = 0, a = 0; rows.forEach(r => { f += +((r.forecast || {})[mo.key] || 0); a += +((r.actual || {})[mo.key] || 0); }); return { mo, f, a }; });
+  const monthly = T.mk.map(mo => { let f = 0, a = 0; rows.forEach(r => { if (!resActiveInMonth(r, mo.key)) return; f += +((r.forecast || {})[mo.key] || 0); a += +((r.actual || {})[mo.key] || 0); }); return { mo, f, a }; });
   const maxV = Math.max(1, ...monthly.map(x => Math.max(x.f, x.a)));
   const bars = `<div style="display:flex;align-items:flex-end;gap:10px;height:158px;margin-top:10px">${monthly.map(x => {
     const fh = x.f / maxV * 124, ah = x.a / maxV * 124;
@@ -4120,9 +4126,10 @@ function renderResourcingView() {
 
   const activeCount = rows.filter(r => r.active !== false).length;
   const resList = rows.length ? rows.slice(0, 300).map((r, i) => {
-    let rf = 0, ra = 0; T.mk.forEach(mo => { rf += +((r.forecast || {})[mo.key] || 0); ra += +((r.actual || {})[mo.key] || 0); });
+    let rf = 0, ra = 0; T.mk.forEach(mo => { if (!resActiveInMonth(r, mo.key)) return; rf += +((r.forecast || {})[mo.key] || 0); ra += +((r.actual || {})[mo.key] || 0); });
     const off = r.active === false;
-    const badge = `<button onclick="resToggleActive(${i})" title="Click to toggle active / inactive" style="cursor:pointer;border:none;font-size:10px;font-weight:700;padding:3px 10px;border-radius:11px;${off ? 'background:#F1F5F9;color:#94A3B8' : 'background:#DCFCE7;color:#15803D'}">${off ? 'Inactive' : 'Active'}</button>`;
+    const eff = off ? (r.inactiveFrom ? ' · from ' + String(r.inactiveFrom).slice(0, 7).replace('-', '/') : '') : (r.activeFrom ? ' · from ' + String(r.activeFrom).slice(0, 7).replace('-', '/') : '');
+    const badge = `<button onclick="resToggleActive(${i})" title="Click to change status (asks for an effective date)" style="cursor:pointer;border:none;font-size:10px;font-weight:700;padding:3px 10px;border-radius:11px;${off ? 'background:#F1F5F9;color:#94A3B8' : 'background:#DCFCE7;color:#15803D'}">${off ? 'Inactive' : 'Active'}${eff}</button>`;
     return `<tr style="${off ? 'opacity:.5' : ''}"><td style="font-weight:500">${r.name || '—'}</td><td style="color:#64748B">${r.role || ''}</td><td>${r.domain || ''}</td><td style="color:#64748B">${r.release || ''}</td><td style="text-align:right">${fmt(rf)}</td><td style="text-align:right;font-weight:600">${fmt(ra)}</td><td style="text-align:center">${badge}</td><td style="text-align:center"><button onclick="resDeleteRow(${i})" title="Remove" style="border:none;background:none;color:#CBD5E1;cursor:pointer;font-size:16px;line-height:1" onmouseover="this.style.color='#DC2626'" onmouseout="this.style.color='#CBD5E1'">×</button></td></tr>`;
   }).join('') : `<tr><td colspan="8" style="text-align:center;color:#94A3B8;padding:18px">No resources yet — <strong>Import forecast</strong> or <strong>Add resource</strong>.</td></tr>`;
 
@@ -4150,7 +4157,20 @@ function renderResourcingView() {
     <div class="res-card" style="border-radius:14px"><div class="res-card-title">Resources <span class="res-hint">imported or added manually</span></div>
       <table class="dtable"><thead><tr><th>Name</th><th>Role</th><th>Domain</th><th>Release</th><th style="text-align:right">FC md</th><th style="text-align:right">Act md</th><th style="text-align:center">Status</th><th></th></tr></thead><tbody>${resList}</tbody></table></div>`;
 }
-function resToggleActive(i) { const r = resourcing.rows[i]; if (!r) return; r.active = (r.active === false); persistResourcing(); renderResourcingView(); }
+function resToggleActive(i) {
+  const r = resourcing.rows[i]; if (!r) return;
+  const today = new Date().toISOString().slice(0, 10);
+  if (r.active === false) {
+    const d = prompt('Active again from (YYYY-MM-DD) — man-days count from this date:', r.activeFrom || today);
+    if (d === null) return;
+    r.active = true; r.activeFrom = (d || '').trim(); r.inactiveFrom = '';
+  } else {
+    const d = prompt('Inactive from (YYYY-MM-DD) — no longer in the program; man-days stop from this date:', today);
+    if (d === null) return;
+    r.active = false; r.inactiveFrom = (d || '').trim();
+  }
+  persistResourcing(); renderResourcingView();
+}
 function resDeleteRow(i) { resourcing.rows.splice(i, 1); persistResourcing(); renderResourcingView(); }
 function resClear() { if (confirm('Clear all ' + resourcing.rows.length + ' resource rows for ' + ORG + '?')) { resourcing.rows = []; persistResourcing(); renderResourcingView(); } }
 function resAddRow() {

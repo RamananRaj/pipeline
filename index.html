@@ -3554,31 +3554,45 @@ function renderDvC() {
 }
 
 // ── Management Dashboard: KPI tiles + SE/TA/PM utilisation heatmap ────────────
-/** Genesis dashboard: resource pool broken down by Domain (headcount + man-days + monthly headcount). */
+/** Genesis dashboard: resource pool broken down by Domain (headcount + man-days + monthly headcount), expandable to the people behind each. */
+let genPoolExpanded = new Set();
+function genPoolToggle(enc) { const d = decodeURIComponent(enc); if (genPoolExpanded.has(d)) genPoolExpanded.delete(d); else genPoolExpanded.add(d); renderDashboardView(); }
 function genDomainPoolPanel() {
   if (!isGenesis() || !(resourcing.rows || []).length) return '';
   const mk = resMonths(); const nowKey = new Date().toISOString().slice(0, 7);
   const dom = {};
   (resourcing.rows || []).forEach(r => {
-    const d = r.domain || '—'; dom[d] = dom[d] || { head: 0, fc: 0, ac: 0, rem: 0, monthly: {} };
-    let fut = 0;
+    const d = r.domain || '—'; dom[d] = dom[d] || { head: 0, fc: 0, ac: 0, rem: 0, monthly: {}, people: [] };
+    let fut = 0, rfc = 0, rac = 0, rot = 0;
     mk.forEach(mo => {
       const f = resFcInMonth(r, mo.key) ? +((r.forecast || {})[mo.key] || 0) : 0;
       const a = resAcInMonth(r, mo.key) ? +((r.actual || {})[mo.key] || 0) : 0;
-      dom[d].fc += f; dom[d].ac += a;
+      const o = resAcInMonth(r, mo.key) ? +((r.overtime || {})[mo.key] || 0) : 0;
+      dom[d].fc += f; dom[d].ac += a; rfc += f; rac += a; rot += o;
       if (mo.key > nowKey) fut += f;
       if (f > 0) dom[d].monthly[mo.key] = (dom[d].monthly[mo.key] || 0) + 1;
     });
     const etc = r.etc != null ? r.etc : fut; dom[d].rem += etc;
     if (r.active !== false) dom[d].head++;
+    dom[d].people.push({ name: r.name || '—', role: r.role || '', fc: rfc, ac: rac, ot: rot, active: r.active !== false });
   });
   const entries = Object.entries(dom).sort((a, b) => b[1].fc - a[1].fc);
   let maxHead = 1; entries.forEach(([, v]) => mk.forEach(mo => { maxHead = Math.max(maxHead, v.monthly[mo.key] || 0); }));
   const fmt = n => Math.round(n).toLocaleString();
   const spark = v => `<div style="display:flex;align-items:flex-end;justify-content:flex-end;gap:1px;height:22px">${mk.map(mo => { const c = v.monthly[mo.key] || 0; const h = Math.max(1, Math.round(c / maxHead * 22)); return `<div title="${mo.label}: ${c} working" style="width:6px;height:${h}px;background:${c ? '#2563EB' : '#E2E8F0'};border-radius:1px"></div>`; }).join('')}</div>`;
   const tot = entries.reduce((s, [, v]) => ({ head: s.head + v.head, fc: s.fc + v.fc, ac: s.ac + v.ac, rem: s.rem + v.rem }), { head: 0, fc: 0, ac: 0, rem: 0 });
-  const body = entries.map(([d, v]) => `<tr><td style="font-weight:600">${d}</td><td style="text-align:right">${v.head}</td><td style="text-align:right">${fmt(v.fc)}</td><td style="text-align:right;font-weight:600">${fmt(v.ac)}</td><td style="text-align:right">${fmt(v.rem)}</td><td>${spark(v)}</td></tr>`).join('');
-  return `<div class="res-card"><div class="res-card-title">Genesis resource pool — by Domain <span class="res-hint">active headcount · forecast / actual / remaining man-days · bars = people working per month</span></div>
+  const body = entries.map(([d, v]) => {
+    const open = genPoolExpanded.has(d); const enc = encodeURIComponent(d);
+    const nameCell = `<td style="font-weight:600"><span onclick="genPoolToggle('${enc}')" style="cursor:pointer;user-select:none" title="Show the people behind this domain"><span style="color:#94A3B8;margin-right:6px">${open ? '▾' : '▸'}</span>${d}</span></td>`;
+    const main = `<tr>${nameCell}<td style="text-align:right">${v.head}</td><td style="text-align:right">${fmt(v.fc)}</td><td style="text-align:right;font-weight:600">${fmt(v.ac)}</td><td style="text-align:right">${fmt(v.rem)}</td><td>${spark(v)}</td></tr>`;
+    let detail = '';
+    if (open) {
+      const people = v.people.slice().sort((a, b) => b.fc - a.fc).map(p => `<tr style="${p.active ? '' : 'opacity:.5'}"><td style="padding:2px 8px;font-size:11px">${p.name}</td><td style="font-size:11px;color:#64748B">${p.role}</td><td style="text-align:right;font-size:11px">${fmt(p.fc)}</td><td style="text-align:right;font-size:11px;font-weight:600">${fmt(p.ac)}</td><td style="text-align:right;font-size:11px">${p.ot > 0 ? `<span style="color:#B45309;font-weight:700">⚑ ${fmt(p.ot)}</span>` : '<span style="color:#CBD5E1">—</span>'}</td></tr>`).join('');
+      detail = `<tr><td colspan="6" style="background:#F8FAFC;padding:8px 12px 10px 30px"><table style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;font-size:10px;color:#94A3B8;padding:2px 8px;text-transform:uppercase;letter-spacing:.3px">Resource (${v.people.length})</th><th style="text-align:left;font-size:10px;color:#94A3B8">Role</th><th style="text-align:right;font-size:10px;color:#94A3B8">Forecast</th><th style="text-align:right;font-size:10px;color:#94A3B8">Actual</th><th style="text-align:right;font-size:10px;color:#94A3B8">OT</th></tr></thead><tbody>${people}</tbody></table></td></tr>`;
+    }
+    return main + detail;
+  }).join('');
+  return `<div class="res-card"><div class="res-card-title">Genesis resource pool — by Domain <span class="res-hint">click a domain to expand the people behind the forecast &amp; who's on overtime · bars = people working per month</span></div>
     <table class="dtable"><thead><tr><th>Domain</th><th style="text-align:right">Head</th><th style="text-align:right">Forecast</th><th style="text-align:right">Actual</th><th style="text-align:right">Remaining</th><th style="text-align:right">Headcount / month</th></tr></thead>
     <tbody>${body}<tr style="border-top:2px solid #E2E8F0;font-weight:700"><td>Total</td><td style="text-align:right">${tot.head}</td><td style="text-align:right">${fmt(tot.fc)}</td><td style="text-align:right">${fmt(tot.ac)}</td><td style="text-align:right">${fmt(tot.rem)}</td><td></td></tr></tbody></table></div>`;
 }
@@ -4561,6 +4575,7 @@ function rmEditLane(sid, gid, lid) { const { ln } = rmFindBar(sid, gid, lid); if
 function rmDelLane(sid, gid, lid) { const s = rmFindSection(sid); const g = s && s.groups.find(x => x.id === gid); if (!g) return; uiConfirm('Delete swimlane', 'Delete this swimlane and its bars?', () => { g.lanes = g.lanes.filter(l => l.id !== lid); persistRoadmap(); renderRoadmap(); }); }
 
 let rmTarget = null;
+function rmAddBar(sid, gid, lid) { rmOpenBar(sid, gid, lid); }   // + on a lane → new-bar modal
 function rmCloseModal() { const w = document.getElementById('rmModalWrap'); if (w) w.remove(); }
 function rmOpenBar(sid, gid, lid, bid) {
   rmTarget = { sid, gid, lid, bid };
@@ -4740,7 +4755,8 @@ function rmDragStart(e) {
   const track = bar.parentElement; if (!track) return;
   const sid = +bar.dataset.sid, gid = +bar.dataset.gid, lid = +bar.dataset.lid, bid = +bar.dataset.bid;
   const { b } = rmFindBar(sid, gid, lid, bid); if (!b) return;
-  rmDrag = { mode, bar, trackW: track.getBoundingClientRect().width, startX: e.clientX, os: b.start, oe: b.end, sid, gid, lid, bid, moved: false, cur: null };
+  rmDrag = { mode, bar, trackW: track.getBoundingClientRect().width, startX: e.clientX, os: b.start, oe: b.end, sid, gid, lid, bid, moved: false, cur: { ns: b.start, ne: b.end } };
+  const tip = document.createElement('div'); tip.style.cssText = 'position:fixed;z-index:100001;background:#0F2544;color:#fff;font-size:10px;font-weight:700;padding:3px 7px;border-radius:5px;pointer-events:none;display:none;white-space:nowrap'; document.body.appendChild(tip); rmDrag.tip = tip;
   bar.style.cursor = mode === 'move' ? 'grabbing' : 'col-resize';
   e.preventDefault();
 }
@@ -4763,10 +4779,12 @@ function rmDragMove(e) {
   rmDrag.cur = { ns, ne };
   const l = rmPct(ns), w = Math.max(0.6, rmPct(ne) - rmPct(ns));
   rmDrag.bar.style.left = l + '%'; rmDrag.bar.style.width = w + '%';
+  if (rmDrag.tip) { const txt = rmDrag.mode === 'l' ? ('Start ' + ns) : rmDrag.mode === 'r' ? ('End ' + ne) : (ns + '  →  ' + ne); rmDrag.tip.textContent = txt; rmDrag.tip.style.left = (e.clientX + 14) + 'px'; rmDrag.tip.style.top = (e.clientY - 8) + 'px'; rmDrag.tip.style.display = 'block'; }
 }
 function rmDragEnd() {
   if (!rmDrag) return;
   const d = rmDrag; rmDrag = null;
+  if (d.tip) d.tip.remove();
   if (d.mode === 'ms') { if (d.moved && d.cur) { const m = roadmap.milestones.find(x => x.id === d.mid); if (m) m.date = d.cur.nd; persistRoadmap(); renderRoadmap(); } else { rmOpenMilestone(d.mid); } return; }
   if (d.moved && d.cur) { const { b } = rmFindBar(d.sid, d.gid, d.lid, d.bid); if (b) { b.start = d.cur.ns; b.end = d.cur.ne; } persistRoadmap(); renderRoadmap(); }
   else { rmOpenBar(d.sid, d.gid, d.lid, d.bid); }   // no real drag ⇒ treat as click-to-edit

@@ -4513,7 +4513,8 @@ function _resMapImport(arr, mode) {
 const RM_CATS = [['phase', 'Phase / Release', '#1F3864'], ['design', 'Design / Align', '#5B9BD5'], ['build', 'Build', '#2E7D32'], ['test', 'Testing', '#4A90D9'], ['integ', 'Integration', '#E07B39'], ['mig', 'Migration', '#7F7F7F'], ['ocm', 'OCM / Change', '#8BC34A']];
 function rmCatColor(c) { const f = RM_CATS.find(x => x[0] === c); return f ? f[2] : '#64748B'; }
 function rmCatName(c) { const f = RM_CATS.find(x => x[0] === c); return f ? f[1] : c; }
-function rmId() { return Date.now() * 1000 + Math.floor(Math.random() * 1000); }
+let _rmSeq = 0;
+function rmId() { _rmSeq = Math.max(_rmSeq + 1, Date.now() * 1000); return _rmSeq; }   // strictly increasing → never collides
 function rmPct(dateStr) { if (!dateStr) return 0; const d = new Date(dateStr + 'T00:00:00Z'); const days = (d - GSTART) / 86400000; return Math.max(0, Math.min(100, days / GTOTAL * 100)); }
 const RM_DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const RM_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -4521,6 +4522,15 @@ function rmFmtDate(iso) { if (!iso) return ''; return RM_DOW[new Date(iso + 'T00
 function rmFmtShort(iso) { if (!iso) return ''; const d = new Date(iso + 'T00:00:00Z'); return d.getUTCDate() + ' ' + RM_MON[d.getUTCMonth()] + ' ' + d.getUTCFullYear(); }
 function rmFindSection(sid) { return roadmap.sections.find(s => s.id === sid); }
 function rmFindBar(sid, gid, lid, bid) { const s = rmFindSection(sid); const g = s && s.groups.find(x => x.id === gid); const ln = g && g.lanes.find(x => x.id === lid); const b = ln && (ln.bars || []).find(x => x.id === bid); return { s, g, ln, b }; }
+/** Reassign any duplicate/missing IDs (e.g. from older clones) so every element is uniquely addressable. */
+function rmEnsureUniqueIds() {
+  const seen = new Set(); let changed = false;
+  const fix = o => { if (o.id == null || seen.has(o.id)) { o.id = rmId(); changed = true; } seen.add(o.id); };
+  (roadmap.sections || []).forEach(s => { fix(s); (s.groups || []).forEach(g => { fix(g); (g.lanes || []).forEach(ln => { fix(ln); (ln.bars || []).forEach(fix); }); }); });
+  (roadmap.milestones || []).forEach(fix);
+  if (changed) persistRoadmap();
+  return changed;
+}
 
 // ── Reusable in-app prompt modal (replaces native prompt()) ──
 let _uiCb = null;
@@ -4728,6 +4738,7 @@ function rmDoSeed() {
 
 function renderRoadmap() {
   const el = document.getElementById('roadmapView'); if (!el) return;
+  rmEnsureUniqueIds();
   const LBL = 210;
   const todayISO = new Date().toISOString().slice(0, 10);
   const todayPct = rmPct(todayISO);

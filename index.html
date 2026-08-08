@@ -4109,6 +4109,11 @@ function resRecalcMonthFromWeeks(r, monthKey) {
   wks.forEach(w => { const h = (r.forecastWk || {})[w.key]; if (h != null && h !== '') { anyEntry = true; sum += (+h || 0); } });
   if (anyEntry) { r.forecast = r.forecast || {}; r.forecast[monthKey] = +(sum / 7.5).toFixed(2); }
 }
+/** Week-commencing (Monday) key for any date — aligns imported weekly data to the entry grid. */
+function resMondayKey(d) {
+  const dd = new Date(d); const dow = (dd.getDay() + 6) % 7; dd.setDate(dd.getDate() - dow);
+  return dd.getFullYear() + '-' + String(dd.getMonth() + 1).padStart(2, '0') + '-' + String(dd.getDate()).padStart(2, '0');
+}
 let resExpanded = new Set();
 function resToggleExpand(id) { if (resExpanded.has(id)) resExpanded.delete(id); else resExpanded.add(id); renderResourcingView(); }
 function resSetWeek(id, wk, val) {
@@ -4173,7 +4178,7 @@ function renderResourcingView() {
     const badge = `<button onclick="resToggleActive(${i})" title="Click to change status (asks for an effective date)" style="cursor:pointer;border:none;font-size:10px;font-weight:700;padding:3px 10px;border-radius:11px;${off ? 'background:#F1F5F9;color:#94A3B8' : 'background:#DCFCE7;color:#15803D'}">${off ? 'Inactive' : 'Active'}${eff}</button>`;
     const open = resExpanded.has(r.id);
     const caret = `<span onclick="resToggleExpand(${r.id})" title="Weekly forecast entry" style="cursor:pointer;color:#94A3B8;margin-right:7px;font-size:11px;user-select:none">${open ? '▾' : '▸'}</span>`;
-    const mainRow = `<tr style="${off ? 'opacity:.5' : ''}"><td style="font-weight:500">${caret}${r.name || '—'}</td><td style="color:#64748B">${r.role || ''}</td><td>${r.domain || ''}</td><td style="color:#64748B">${r.release || ''}</td><td style="text-align:right">${fmt(rf)}</td><td style="text-align:right;font-weight:600">${fmt(ra)}</td><td style="text-align:right">${etcCell}</td><td style="text-align:right">${otCell}</td><td style="text-align:center">${badge}</td><td style="text-align:center"><button onclick="resDeleteRow(${i})" title="Remove" style="border:none;background:none;color:#CBD5E1;cursor:pointer;font-size:16px;line-height:1" onmouseover="this.style.color='#DC2626'" onmouseout="this.style.color='#CBD5E1'">×</button></td></tr>`;
+    const mainRow = `<tr style="${off ? 'opacity:.5' : ''}"><td style="font-weight:500">${caret}<span onclick="resOpenDetail(${i})" title="Open resource details" style="cursor:pointer;border-bottom:1px dotted transparent" onmouseover="this.style.borderBottomColor='#94A3B8'" onmouseout="this.style.borderBottomColor='transparent'">${r.name || '—'}</span></td><td style="color:#64748B">${r.role || ''}</td><td>${r.domain || ''}</td><td style="color:#64748B">${r.release || ''}</td><td style="text-align:right">${fmt(rf)}</td><td style="text-align:right;font-weight:600">${fmt(ra)}</td><td style="text-align:right">${etcCell}</td><td style="text-align:right">${otCell}</td><td style="text-align:center">${badge}</td><td style="text-align:center"><button onclick="resDeleteRow(${i})" title="Remove" style="border:none;background:none;color:#CBD5E1;cursor:pointer;font-size:16px;line-height:1" onmouseover="this.style.color='#DC2626'" onmouseout="this.style.color='#CBD5E1'">×</button></td></tr>`;
     let detail = '';
     if (open) {
       const WK = resWeeks(), byMo = {};
@@ -4182,12 +4187,16 @@ function renderResourcingView() {
         const wks = byMo[mo.key] || []; if (!wks.length) return '';
         const inputs = wks.map(w => {
           const val = (r.forecastWk || {})[w.key];
-          return `<label style="display:flex;flex-direction:column;align-items:center;gap:2px;font-size:9px;color:#94A3B8">${w.label}<input type="number" min="0" step="0.5" value="${val != null ? val : ''}" onchange="resSetWeek(${r.id},'${w.key}',this.value)" style="width:46px;padding:3px;border:1px solid #E2E8F0;border-radius:5px;font-size:11px;text-align:center" placeholder="h"></label>`;
+          const aw = (r.actualWk || {})[w.key];
+          const over = aw != null && aw > 37.5;
+          const actLine = `<span title="Actual hours (timesheet)" style="font-size:9px;font-weight:700;color:${aw == null ? '#CBD5E1' : over ? '#B45309' : '#0F766E'}">${aw != null ? 'A ' + aw : 'A ·'}</span>`;
+          return `<label style="display:flex;flex-direction:column;align-items:center;gap:3px;font-size:9px;color:#94A3B8">${w.label}<input type="number" min="0" step="0.5" value="${val != null ? val : ''}" onchange="resSetWeek(${r.id},'${w.key}',this.value)" title="Forecast hours" style="width:48px;padding:3px;border:1px solid #E2E8F0;border-radius:5px;font-size:11px;text-align:center" placeholder="F h">${actLine}</label>`;
         }).join('');
         const md = +((r.forecast || {})[mo.key] || 0);
-        return `<div style="border:1px solid #E2E8F0;border-radius:8px;padding:8px 9px;background:#fff"><div style="font-size:10px;font-weight:700;color:#0F2544;margin-bottom:6px">${mo.label} · <span style="color:#2563EB">${fmt(md)} md</span></div><div style="display:flex;gap:6px;flex-wrap:wrap">${inputs}</div></div>`;
+        let am = 0; wks.forEach(w => { const aw = (r.actualWk || {})[w.key]; if (aw != null) am += (+aw || 0); }); am = +(am / 7.5).toFixed(2);
+        return `<div style="border:1px solid #E2E8F0;border-radius:8px;padding:8px 9px;background:#fff"><div style="font-size:10px;font-weight:700;color:#0F2544;margin-bottom:6px">${mo.label} · <span style="color:#2563EB">F ${fmt(md)}</span> · <span style="color:#0F766E">A ${fmt(am)}</span> md</div><div style="display:flex;gap:8px;flex-wrap:wrap">${inputs}</div></div>`;
       }).join('');
-      detail = `<tr><td colspan="10" style="background:#F8FAFC;padding:12px 16px"><div style="font-size:11px;color:#64748B;margin-bottom:9px">✎ Weekly forecast — enter hours per week (W/C Mon); each month totals to man-days at 37.5 h/week. Months left blank keep their imported figure.</div><div style="display:flex;gap:12px;flex-wrap:wrap">${blocks}</div></td></tr>`;
+      detail = `<tr><td colspan="10" style="background:#F8FAFC;padding:12px 16px"><div style="font-size:11px;color:#64748B;margin-bottom:9px">✎ Week-by-week (W/C Mon) — box = <strong style="color:#2563EB">Forecast</strong> hours (editable), <strong style="color:#0F766E">A</strong> = <strong style="color:#0F766E">Actual</strong> hours from timesheets. Each month totals to man-days at 37.5 h/week; months left blank keep their imported forecast.</div><div style="display:flex;gap:12px;flex-wrap:wrap">${blocks}</div></td></tr>`;
     }
     return mainRow + detail;
   }).join('') : `<tr><td colspan="10" style="text-align:center;color:#94A3B8;padding:18px">No resources yet — <strong>Import forecast</strong> or <strong>Add resource</strong>.</td></tr>`;
@@ -4199,7 +4208,7 @@ function renderResourcingView() {
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-ghost btn-sm" onclick="resImport('forecast')" style="font-size:11px">⬆ Import forecast</button>
         <button class="btn btn-ghost btn-sm" onclick="resImport('actual')" style="font-size:11px">⬆ Import actuals</button>
-        <button class="btn btn-ghost btn-sm" onclick="resAddRow()" style="font-size:11px">＋ Add resource</button>
+        <button class="btn btn-ghost btn-sm" onclick="resOpenDetail(-1)" style="font-size:11px">＋ Add resource</button>
         ${rows.length ? `<button class="btn btn-ghost btn-sm" onclick="resClear()" style="font-size:11px;color:#DC2626">Clear</button>` : ''}
       </div>
     </div>
@@ -4240,6 +4249,63 @@ function resEditETC(i) {
   const t = String(v).trim();
   if (t === '') { delete r.etc; } else { const n = parseFloat(t); if (!isNaN(n)) r.etc = n; }
   persistResourcing(); renderResourcingView();
+}
+// ── Resource detail modal — capture / edit everything in one place (also the "new resource" form) ──
+function resOpenDetail(i) {
+  const isNew = (i == null || i < 0);
+  const r = isNew ? { name: '', role: '', domain: '', location: '', release: '', active: true, activeFrom: '', inactiveFrom: '' } : resourcing.rows[i];
+  if (!r) return;
+  const active = r.active !== false;
+  const esc = s => String(s == null ? '' : s).replace(/"/g, '&quot;');
+  const fld = (label, id, val, type, ph) => `<label style="display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:#64748B">${label}<input id="${id}" type="${type || 'text'}" value="${esc(val)}" placeholder="${ph || ''}" style="padding:8px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:13px;color:#0F2544"></label>`;
+  resCloseDetail();
+  const wrap = document.createElement('div');
+  wrap.id = 'resModalWrap';
+  wrap.style.cssText = 'position:fixed;inset:0;background:rgba(15,37,68,.45);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px';
+  wrap.onclick = e => { if (e.target === wrap) resCloseDetail(); };
+  wrap.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:540px;width:100%;box-shadow:0 20px 60px rgba(15,37,68,.3);padding:24px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
+      <div style="font-size:18px;font-weight:800;color:#0F2544">${isNew ? 'New resource' : 'Resource details'}</div>
+      <button onclick="resCloseDetail()" style="border:none;background:none;font-size:22px;color:#CBD5E1;cursor:pointer;line-height:1">×</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div style="grid-column:1/3">${fld('Name', 'rdName', r.name)}</div>
+      ${fld('Title / role', 'rdRole', r.role)}
+      ${fld('Area / domain', 'rdDom', r.domain)}
+      ${fld('Release', 'rdRel', r.release, 'text', 'R2.0 / R2.1 / R2.2')}
+      ${fld('Location', 'rdLoc', r.location)}
+      ${fld('Start date', 'rdStart', r.activeFrom, 'date')}
+      ${fld('End date', 'rdEnd', r.inactiveFrom, 'date')}
+      <label style="grid-column:1/3;display:flex;flex-direction:column;gap:6px;font-size:11px;font-weight:600;color:#64748B">Status
+        <div style="display:flex;gap:8px">
+          <label style="flex:1;display:flex;align-items:center;gap:6px;padding:9px 10px;border:1px solid #E2E8F0;border-radius:8px;cursor:pointer;font-size:13px;color:#0F2544"><input type="radio" name="rdStatus" value="active" ${active ? 'checked' : ''}> Active</label>
+          <label style="flex:1;display:flex;align-items:center;gap:6px;padding:9px 10px;border:1px solid #E2E8F0;border-radius:8px;cursor:pointer;font-size:13px;color:#0F2544"><input type="radio" name="rdStatus" value="inactive" ${!active ? 'checked' : ''}> Inactive</label>
+        </div></label>
+    </div>
+    <div style="font-size:10.5px;color:#94A3B8;margin-top:12px">Start / end drive which months count: man-days only accrue from the start date up to (not including) the end date.</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:20px">
+      <div>${isNew ? '' : `<button onclick="if(confirm('Remove this resource?')){resDeleteRow(${i});resCloseDetail();}" style="border:none;background:none;color:#DC2626;cursor:pointer;font-size:12px">Delete</button>`}</div>
+      <div style="display:flex;gap:10px">
+        <button onclick="resCloseDetail()" style="background:#F1F5F9;color:#475569;border:none;padding:9px 16px;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px">Cancel</button>
+        <button onclick="resSaveDetail(${isNew ? -1 : i})" style="background:#0F2544;color:#fff;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-weight:700;font-size:13px">${isNew ? 'Add resource' : 'Save'}</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.appendChild(wrap);
+  const nm = document.getElementById('rdName'); if (nm) nm.focus();
+}
+function resCloseDetail() { const w = document.getElementById('resModalWrap'); if (w) w.remove(); }
+function resSaveDetail(i) {
+  const g = id => { const el = document.getElementById(id); return el ? el.value : ''; };
+  const name = g('rdName').trim(); if (!name) { alert('Name is required.'); return; }
+  const status = (document.querySelector('input[name="rdStatus"]:checked') || {}).value || 'active';
+  const rec = (i < 0) ? { id: Date.now(), forecast: {}, actual: {} } : resourcing.rows[i];
+  rec.name = name; rec.role = g('rdRole').trim(); rec.domain = g('rdDom').trim();
+  rec.location = g('rdLoc').trim(); rec.release = g('rdRel').trim();
+  rec.activeFrom = g('rdStart').trim(); rec.inactiveFrom = g('rdEnd').trim();
+  rec.active = status === 'active';
+  if (i < 0) resourcing.rows.push(rec);
+  persistResourcing(); resCloseDetail(); renderResourcingView();
 }
 function resDeleteRow(i) { resourcing.rows.splice(i, 1); persistResourcing(); renderResourcingView(); }
 function resClear() { if (confirm('Clear all ' + resourcing.rows.length + ' resource rows for ' + ORG + '?')) { resourcing.rows = []; persistResourcing(); renderResourcingView(); } }
@@ -4303,15 +4369,16 @@ function _resMapImport(arr, mode) {
     let rec = resourcing.rows.find(x => x.name === String(nm) && (x.domain || '') === dom && (x.release || '') === (iPhase >= 0 ? String(row[iPhase] || '') : (x.release || '')));
     if (!rec) { rec = { id: Date.now() + r, name: String(nm), role: iRole >= 0 ? String(row[iRole] || '') : '', domain: dom, location: iLoc >= 0 ? String(row[iLoc] || '') : '', release: iPhase >= 0 ? String(row[iPhase] || '') : '', forecast: {}, actual: {} }; resourcing.rows.push(rec); }
     rec[field] = rec[field] || {};
-    const acc = {}, accOT = {};   // sum by month; weekly cells are capped at 37.5h, excess → overtime
+    const acc = {}, accOT = {}, accWk = {};   // sum by month; weekly cells cap at 37.5h (excess → overtime); accWk keeps raw weekly hours
     dcols.forEach(([ci, d]) => {
       const v = row[ci]; const num = typeof v === 'number' ? v : parseFloat(v); if (isNaN(num)) return;
       const k = monthOf(d);
-      if (weekly) { acc[k] = (acc[k] || 0) + num; const ot = Math.max(0, num - WEEK_CAP); if (ot > 0) { accOT[k] = (accOT[k] || 0) + ot; otAny = true; } }
+      if (weekly) { acc[k] = (acc[k] || 0) + num; const ot = Math.max(0, num - WEEK_CAP); if (ot > 0) { accOT[k] = (accOT[k] || 0) + ot; otAny = true; } const mk = resMondayKey(d); accWk[mk] = (accWk[mk] || 0) + num; }
       else { acc[k] = (acc[k] || 0) + num; }
     });
     Object.keys(acc).forEach(k => { rec[field][k] = weekly ? +(acc[k] / HRS_PER_DAY).toFixed(2) : acc[k]; });
     if (weekly && field === 'actual') { rec.overtime = rec.overtime || {}; Object.keys(accOT).forEach(k => { rec.overtime[k] = +(accOT[k] / HRS_PER_DAY).toFixed(2); }); }
+    if (weekly) { const wf = field === 'actual' ? 'actualWk' : 'forecastWk'; rec[wf] = rec[wf] || {}; Object.keys(accWk).forEach(mk => { rec[wf][mk] = accWk[mk]; }); }
     n++;
   }
   persistResourcing(); renderResourcingView();

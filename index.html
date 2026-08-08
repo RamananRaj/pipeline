@@ -4530,7 +4530,6 @@ function uiModalSave() {
   if (cb) cb(vals);
 }
 function uiModal(title, fields, saveLabel, cb) {
-  _uiCb = cb;
   const esc = s => String(s == null ? '' : s).replace(/"/g, '&quot;');
   const body = fields.map(f => {
     const lab = `<label style="display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:#64748B">${f.label}`;
@@ -4539,6 +4538,7 @@ function uiModal(title, fields, saveLabel, cb) {
     return `${lab}<input id="ui_${f.id}" type="${f.type || 'text'}" value="${esc(f.value)}" placeholder="${esc(f.placeholder)}" style="padding:8px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:13px;color:#0F2544"></label>`;
   }).join('');
   uiCloseModal();
+  _uiCb = cb;
   const wrap = document.createElement('div'); wrap.id = 'uiModalWrap';
   wrap.style.cssText = 'position:fixed;inset:0;background:rgba(15,37,68,.45);z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px';
   wrap.onclick = e => { if (e.target === wrap) uiCloseModal(); };
@@ -4596,6 +4596,7 @@ function rmOpenBar(sid, gid, lid, bid) {
       <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:#64748B">Bar colour<input id="rbColor" type="color" value="${esc(b.color || rmCatColor(b.cat || RM_CATS[0][0]))}" title="Overrides the category colour for this bar" style="width:100%;height:38px;border:1px solid #E2E8F0;border-radius:8px;cursor:pointer;background:#fff"></label>
       <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:#64748B">Start<input id="rbStart" type="date" value="${esc(b.start)}" style="padding:8px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:13px"></label>
       <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:#64748B">End<input id="rbEnd" type="date" value="${esc(b.end)}" style="padding:8px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:13px"></label>
+      <div style="grid-column:1/3;display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span style="font-size:10px;color:#94A3B8;margin-right:2px">Quick colours:</span>${['#DC2626', '#EA580C', '#F59E0B', '#16A34A', '#0D9488', '#2563EB', '#1F3864', '#7C3AED', '#DB2777', '#64748B'].map(c => `<button type="button" onclick="document.getElementById('rbColor').value='${c}'" title="${c}" style="width:22px;height:22px;border-radius:5px;border:1px solid #E2E8F0;background:${c};cursor:pointer;padding:0"></button>`).join('')}</div>
     </div>
     <div style="display:flex;justify-content:space-between;margin-top:20px">
       <div>${bid ? `<button onclick="rmDelBar()" style="border:none;background:none;color:#DC2626;cursor:pointer;font-size:12px">Delete</button>` : ''}</div>

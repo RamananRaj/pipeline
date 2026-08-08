@@ -4752,7 +4752,7 @@ function renderRoadmap() {
         const bars = (ln.bars || []).map((b, bi) => { const l = rmPct(b.start), w = Math.max(0.6, rmPct(b.end) - rmPct(b.start)); const top = 4 + bi * 20; return `<div data-rmbar data-sid="${s.id}" data-gid="${g.id}" data-lid="${ln.id}" data-bid="${b.id}" title="${String(b.label || '').replace(/"/g, '&quot;')} (${rmFmtDate(b.start)} → ${rmFmtDate(b.end)}) — drag to move, edges to resize, click to edit" style="position:absolute;top:${top}px;left:${l}%;width:${w}%;height:16px;background:${b.color || rmCatColor(b.cat)};border-radius:3px;color:#fff;font-size:9px;font-weight:700;line-height:16px;overflow:hidden;white-space:nowrap;cursor:grab;user-select:none"><span data-rmh="l" style="position:absolute;left:0;top:0;bottom:0;width:6px;cursor:col-resize"></span><span style="display:block;padding:0 7px;pointer-events:none;overflow:hidden;text-overflow:ellipsis">${b.label || ''}</span><span data-rmh="r" style="position:absolute;right:0;top:0;bottom:0;width:6px;cursor:col-resize"></span></div>`; }).join('');
         body += `<div style="display:flex;border-bottom:1px solid #EEF2F7;min-height:${rowH}px">
           <div style="width:${LBL}px;flex:none;display:flex;align-items:center;gap:5px;padding:0 8px;font-size:11px;color:#334155;background:#F8FAFC;border-right:1px solid #E2E8F0"><span onclick="rmEditLane(${s.id},${g.id},${ln.id})" title="Rename" style="cursor:pointer;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${ln.name || 'Lane'}</span>${laneBtn(`rmMoveLane(${ln.id},-1)`, '▲')}${laneBtn(`rmMoveLane(${ln.id},1)`, '▼')}${laneBtn(`rmDupLane(${s.id},${g.id},${ln.id})`, '⧉')}${laneBtn(`rmAddBar(${s.id},${g.id},${ln.id})`, '+', '#2563EB')}${laneBtn(`rmDelLane(${s.id},${g.id},${ln.id})`, '×', '#DC2626')}</div>
-          <div style="flex:1;position:relative;background:${(laneIdx++ % 2) ? '#FAFBFC' : '#fff'}">${todayPct > 0 && todayPct < 100 ? `<div style="position:absolute;top:0;bottom:0;left:${todayPct}%;width:2px;background:#EF4444;z-index:3"></div>` : ''}${bars}</div>
+          <div data-lanetrack data-sid="${s.id}" data-gid="${g.id}" data-lid="${ln.id}" style="flex:1;position:relative;background:${(laneIdx++ % 2) ? '#FAFBFC' : '#fff'}">${todayPct > 0 && todayPct < 100 ? `<div style="position:absolute;top:0;bottom:0;left:${todayPct}%;width:2px;background:#EF4444;z-index:3"></div>` : ''}${bars}</div>
         </div>`;
       });
     });
@@ -4803,7 +4803,7 @@ function rmDragStart(e) {
   const track = bar.parentElement; if (!track) return;
   const sid = +bar.dataset.sid, gid = +bar.dataset.gid, lid = +bar.dataset.lid, bid = +bar.dataset.bid;
   const { b } = rmFindBar(sid, gid, lid, bid); if (!b) return;
-  rmDrag = { mode, bar, trackW: track.getBoundingClientRect().width, startX: e.clientX, os: b.start, oe: b.end, sid, gid, lid, bid, moved: false, cur: { ns: b.start, ne: b.end } };
+  rmDrag = { mode, bar, trackW: track.getBoundingClientRect().width, startX: e.clientX, startY: e.clientY, os: b.start, oe: b.end, sid, gid, lid, bid, moved: false, cur: { ns: b.start, ne: b.end }, hoverTrk: null, dropLane: null };
   const tip = document.createElement('div'); tip.style.cssText = 'position:fixed;z-index:100001;background:#0F2544;color:#fff;font-size:10px;font-weight:700;padding:3px 7px;border-radius:5px;pointer-events:none;display:none;white-space:nowrap'; document.body.appendChild(tip); rmDrag.tip = tip;
   bar.style.cursor = mode === 'move' ? 'grabbing' : 'col-resize';
   e.preventDefault();
@@ -4817,8 +4817,8 @@ function rmDragMove(e) {
     const badge = rmDrag.el.querySelector('.rmms-date'); if (badge) { badge.style.display = 'block'; badge.textContent = rmFmtDate(nd); }
     return;
   }
-  const dx = e.clientX - rmDrag.startX;
-  if (Math.abs(dx) > 3) rmDrag.moved = true;
+  const dx = e.clientX - rmDrag.startX, dy = e.clientY - rmDrag.startY;
+  if (Math.abs(dx) > 3 || Math.abs(dy) > 3) rmDrag.moved = true;
   const dd = Math.round(dx / rmDrag.trackW * GTOTAL);
   let ns = rmDrag.os, ne = rmDrag.oe;
   if (rmDrag.mode === 'move') { ns = rmAddDays(rmDrag.os, dd); ne = rmAddDays(rmDrag.oe, dd); }
@@ -4828,11 +4828,31 @@ function rmDragMove(e) {
   const l = rmPct(ns), w = Math.max(0.6, rmPct(ne) - rmPct(ns));
   rmDrag.bar.style.left = l + '%'; rmDrag.bar.style.width = w + '%';
   if (rmDrag.tip) { const txt = rmDrag.mode === 'l' ? ('Start ' + rmFmtDate(ns)) : rmDrag.mode === 'r' ? ('End ' + rmFmtDate(ne)) : (rmFmtDate(ns) + '  →  ' + rmFmtDate(ne)); rmDrag.tip.textContent = txt; rmDrag.tip.style.left = (e.clientX + 14) + 'px'; rmDrag.tip.style.top = (e.clientY - 8) + 'px'; rmDrag.tip.style.display = 'block'; }
+  if (rmDrag.mode === 'move') {   // detect a different lane under the cursor → highlight as drop target
+    rmDrag.bar.style.pointerEvents = 'none';
+    const under = document.elementFromPoint(e.clientX, e.clientY);
+    rmDrag.bar.style.pointerEvents = '';
+    const trk = under && under.closest ? under.closest('[data-lanetrack]') : null;
+    if (rmDrag.hoverTrk && rmDrag.hoverTrk !== trk) { rmDrag.hoverTrk.style.boxShadow = ''; rmDrag.hoverTrk = null; }
+    if (trk && +trk.dataset.lid !== rmDrag.lid) { trk.style.boxShadow = 'inset 0 0 0 2px #2563EB'; rmDrag.hoverTrk = trk; rmDrag.dropLane = { sid: +trk.dataset.sid, gid: +trk.dataset.gid, lid: +trk.dataset.lid }; }
+    else { rmDrag.dropLane = null; }
+  }
 }
 function rmDragEnd() {
   if (!rmDrag) return;
   const d = rmDrag; rmDrag = null;
   if (d.tip) d.tip.remove();
+  if (d.hoverTrk) d.hoverTrk.style.boxShadow = '';
+  if (d.moved && d.dropLane && d.dropLane.lid !== d.lid) {   // dropped on another lane → reassign
+    const src = rmFindBar(d.sid, d.gid, d.lid, d.bid);
+    const tgt = rmFindBar(d.dropLane.sid, d.dropLane.gid, d.dropLane.lid);
+    if (src.b && src.ln && tgt.ln) {
+      if (d.cur) { src.b.start = d.cur.ns; src.b.end = d.cur.ne; }
+      src.ln.bars.splice(src.ln.bars.indexOf(src.b), 1);
+      (tgt.ln.bars = tgt.ln.bars || []).push(src.b);
+      persistRoadmap(); renderRoadmap(); return;
+    }
+  }
   if (d.mode === 'ms') { if (d.moved && d.cur) { const m = roadmap.milestones.find(x => x.id === d.mid); if (m) m.date = d.cur.nd; persistRoadmap(); renderRoadmap(); } else { rmOpenMilestone(d.mid); } return; }
   if (d.moved && d.cur) { const { b } = rmFindBar(d.sid, d.gid, d.lid, d.bid); if (b) { b.start = d.cur.ns; b.end = d.cur.ne; } persistRoadmap(); renderRoadmap(); }
   else { rmOpenBar(d.sid, d.gid, d.lid, d.bid); }   // no real drag ⇒ treat as click-to-edit

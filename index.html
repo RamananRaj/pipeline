@@ -4515,6 +4515,8 @@ function rmCatColor(c) { const f = RM_CATS.find(x => x[0] === c); return f ? f[2
 function rmCatName(c) { const f = RM_CATS.find(x => x[0] === c); return f ? f[1] : c; }
 function rmId() { return Date.now() * 1000 + Math.floor(Math.random() * 1000); }
 function rmPct(dateStr) { if (!dateStr) return 0; const d = new Date(dateStr + 'T00:00:00Z'); const days = (d - GSTART) / 86400000; return Math.max(0, Math.min(100, days / GTOTAL * 100)); }
+const RM_DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+function rmFmtDate(iso) { if (!iso) return ''; return RM_DOW[new Date(iso + 'T00:00:00Z').getUTCDay()] + ' ' + iso; }
 function rmFindSection(sid) { return roadmap.sections.find(s => s.id === sid); }
 function rmFindBar(sid, gid, lid, bid) { const s = rmFindSection(sid); const g = s && s.groups.find(x => x.id === gid); const ln = g && g.lanes.find(x => x.id === lid); const b = ln && (ln.bars || []).find(x => x.id === bid); return { s, g, ln, b }; }
 
@@ -4590,7 +4592,8 @@ function rmOpenBar(sid, gid, lid, bid) {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><div style="font-size:17px;font-weight:800;color:#0F2544">${bid ? 'Edit bar' : 'New bar'}</div><button onclick="rmCloseModal()" style="border:none;background:none;font-size:22px;color:#CBD5E1;cursor:pointer">×</button></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <label style="grid-column:1/3;display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:#64748B">Label<input id="rbLabel" value="${esc(b.label)}" style="padding:8px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:13px"></label>
-      <label style="grid-column:1/3;display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:#64748B">Category<select id="rbCat" style="padding:8px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:13px">${opts}</select></label>
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:#64748B">Category<select id="rbCat" style="padding:8px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:13px">${opts}</select></label>
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:#64748B">Bar colour<input id="rbColor" type="color" value="${esc(b.color || rmCatColor(b.cat || RM_CATS[0][0]))}" title="Overrides the category colour for this bar" style="width:100%;height:38px;border:1px solid #E2E8F0;border-radius:8px;cursor:pointer;background:#fff"></label>
       <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:#64748B">Start<input id="rbStart" type="date" value="${esc(b.start)}" style="padding:8px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:13px"></label>
       <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:600;color:#64748B">End<input id="rbEnd" type="date" value="${esc(b.end)}" style="padding:8px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:13px"></label>
     </div>
@@ -4603,13 +4606,15 @@ function rmOpenBar(sid, gid, lid, bid) {
 }
 function rmSaveBar() {
   const g = id => { const el = document.getElementById(id); return el ? el.value : ''; };
-  const label = g('rbLabel').trim(), cat = g('rbCat'), start = g('rbStart'), end = g('rbEnd');
+  const label = g('rbLabel').trim(), cat = g('rbCat'), start = g('rbStart'), end = g('rbEnd'), color = g('rbColor');
   if (!start || !end) { alert('Start and end dates are required.'); return; }
   if (end < start) { alert('End date must be on or after the start date.'); return; }
   const t = rmTarget; const { ln } = rmFindBar(t.sid, t.gid, t.lid);
   if (!ln) return;
-  if (t.bid) { const b = (ln.bars || []).find(x => x.id === t.bid); if (b) { b.label = label; b.cat = cat; b.start = start; b.end = end; } }
-  else { ln.bars = ln.bars || []; ln.bars.push({ id: rmId(), label, cat, start, end }); }
+  let bar;
+  if (t.bid) { bar = (ln.bars || []).find(x => x.id === t.bid); if (bar) { bar.label = label; bar.cat = cat; bar.start = start; bar.end = end; } }
+  else { bar = { id: rmId(), label, cat, start, end }; ln.bars = ln.bars || []; ln.bars.push(bar); }
+  if (bar) { if (color && color.toLowerCase() !== String(rmCatColor(cat)).toLowerCase()) bar.color = color; else delete bar.color; }  // store only genuine overrides
   persistRoadmap(); rmCloseModal(); renderRoadmap();
 }
 function rmDelBar() { const t = rmTarget; if (!t || !t.bid) return; const { ln } = rmFindBar(t.sid, t.gid, t.lid); if (ln) ln.bars = (ln.bars || []).filter(b => b.id !== t.bid); persistRoadmap(); rmCloseModal(); renderRoadmap(); }
@@ -4691,7 +4696,7 @@ function renderRoadmap() {
 
   const mss = (roadmap.milestones || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
   const msH = 64;
-  const msHtml = mss.map((m, i) => { const l = rmPct(m.date); const tier = (i % 3) * 18; const lineH = msH - tier - 12; return `<div data-rmms data-mid="${m.id}" title="${String(m.label || '').replace(/"/g, '&quot;')} · ${m.date || ''} — drag to move, click to edit" style="position:absolute;left:${l}%;top:${tier}px;cursor:grab;user-select:none;white-space:nowrap"><div style="font-size:9.5px;color:#0F2544;pointer-events:none"><span style="color:#EA580C;font-weight:800">▶</span> ${m.label || ''}</div><div style="position:absolute;left:0;top:12px;width:1.5px;height:${lineH}px;background:#F59E0B;opacity:.5;pointer-events:none"></div><div class="rmms-date" style="display:none;position:absolute;left:0;top:-15px;font-size:9px;font-weight:700;color:#7c2d12;background:#FEF3C7;border:1px solid #FCD34D;padding:0 4px;border-radius:4px;pointer-events:none"></div></div>`; }).join('');
+  const msHtml = mss.map((m, i) => { const l = rmPct(m.date); const tier = (i % 3) * 18; const lineH = msH - tier - 12; return `<div data-rmms data-mid="${m.id}" title="${String(m.label || '').replace(/"/g, '&quot;')} · ${rmFmtDate(m.date)} — drag to move, click to edit" style="position:absolute;left:${l}%;top:${tier}px;cursor:grab;user-select:none;white-space:nowrap"><div style="font-size:9.5px;color:#0F2544;pointer-events:none"><span style="color:#EA580C;font-weight:800">▶</span> ${m.label || ''}</div><div style="position:absolute;left:0;top:12px;width:1.5px;height:${lineH}px;background:#F59E0B;opacity:.5;pointer-events:none"></div><div class="rmms-date" style="display:none;position:absolute;left:0;top:-15px;font-size:9px;font-weight:700;color:#7c2d12;background:#FEF3C7;border:1px solid #FCD34D;padding:0 4px;border-radius:4px;pointer-events:none"></div></div>`; }).join('');
 
   let body = '', laneIdx = 0;
   roadmap.sections.forEach(s => {
@@ -4701,7 +4706,7 @@ function renderRoadmap() {
     (s.groups || []).forEach(g => {
       if (g.name) body += `<div style="display:flex;align-items:center;background:#EEF2F7;color:#334155;font-size:10.5px;font-weight:700;padding:3px 8px 3px 18px"><div style="flex:1;cursor:pointer" onclick="rmEditGroup(${s.id},${g.id})" title="Click to rename this sub-section">${g.name}</div>${laneBtn(`rmAddLane(${s.id},${g.id})`, '+ Lane')} <span style="width:5px"></span>${laneBtn(`rmEditGroup(${s.id},${g.id})`, '✎')}${laneBtn(`rmDelGroup(${s.id},${g.id})`, '×', '#DC2626')}</div>`;
       (g.lanes || []).forEach(ln => {
-        const bars = (ln.bars || []).map(b => { const l = rmPct(b.start), w = Math.max(0.6, rmPct(b.end) - rmPct(b.start)); return `<div data-rmbar data-sid="${s.id}" data-gid="${g.id}" data-lid="${ln.id}" data-bid="${b.id}" title="${String(b.label || '').replace(/"/g, '&quot;')} (${b.start || ''} → ${b.end || ''}) — drag to move, edges to resize, click to edit" style="position:absolute;top:4px;left:${l}%;width:${w}%;height:16px;background:${rmCatColor(b.cat)};border-radius:3px;color:#fff;font-size:9px;font-weight:700;line-height:16px;overflow:hidden;white-space:nowrap;cursor:grab;user-select:none"><span data-rmh="l" style="position:absolute;left:0;top:0;bottom:0;width:6px;cursor:col-resize"></span><span style="display:block;padding:0 7px;pointer-events:none;overflow:hidden;text-overflow:ellipsis">${b.label || ''}</span><span data-rmh="r" style="position:absolute;right:0;top:0;bottom:0;width:6px;cursor:col-resize"></span></div>`; }).join('');
+        const bars = (ln.bars || []).map(b => { const l = rmPct(b.start), w = Math.max(0.6, rmPct(b.end) - rmPct(b.start)); return `<div data-rmbar data-sid="${s.id}" data-gid="${g.id}" data-lid="${ln.id}" data-bid="${b.id}" title="${String(b.label || '').replace(/"/g, '&quot;')} (${rmFmtDate(b.start)} → ${rmFmtDate(b.end)}) — drag to move, edges to resize, click to edit" style="position:absolute;top:4px;left:${l}%;width:${w}%;height:16px;background:${b.color || rmCatColor(b.cat)};border-radius:3px;color:#fff;font-size:9px;font-weight:700;line-height:16px;overflow:hidden;white-space:nowrap;cursor:grab;user-select:none"><span data-rmh="l" style="position:absolute;left:0;top:0;bottom:0;width:6px;cursor:col-resize"></span><span style="display:block;padding:0 7px;pointer-events:none;overflow:hidden;text-overflow:ellipsis">${b.label || ''}</span><span data-rmh="r" style="position:absolute;right:0;top:0;bottom:0;width:6px;cursor:col-resize"></span></div>`; }).join('');
         body += `<div style="display:flex;border-bottom:1px solid #EEF2F7;min-height:26px">
           <div style="width:${LBL}px;flex:none;display:flex;align-items:center;gap:5px;padding:0 8px;font-size:11px;color:#334155;background:#F8FAFC;border-right:1px solid #E2E8F0"><span onclick="rmEditLane(${s.id},${g.id},${ln.id})" title="Rename" style="cursor:pointer;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${ln.name || 'Lane'}</span>${laneBtn(`rmAddBar(${s.id},${g.id},${ln.id})`, '+', '#2563EB')}${laneBtn(`rmDelLane(${s.id},${g.id},${ln.id})`, '×', '#DC2626')}</div>
           <div style="flex:1;position:relative;background:${(laneIdx++ % 2) ? '#FAFBFC' : '#fff'}">${todayPct > 0 && todayPct < 100 ? `<div style="position:absolute;top:0;bottom:0;left:${todayPct}%;width:2px;background:#EF4444;z-index:3"></div>` : ''}${bars}</div>
@@ -4766,7 +4771,7 @@ function rmDragMove(e) {
     const dxm = e.clientX - rmDrag.startX; if (Math.abs(dxm) > 3) rmDrag.moved = true;
     const dd = Math.round(dxm / rmDrag.bandW * GTOTAL); const nd = rmAddDays(rmDrag.od, dd); rmDrag.cur = { nd };
     rmDrag.el.style.left = rmPct(nd) + '%';
-    const badge = rmDrag.el.querySelector('.rmms-date'); if (badge) { badge.style.display = 'block'; badge.textContent = nd; }
+    const badge = rmDrag.el.querySelector('.rmms-date'); if (badge) { badge.style.display = 'block'; badge.textContent = rmFmtDate(nd); }
     return;
   }
   const dx = e.clientX - rmDrag.startX;
@@ -4779,7 +4784,7 @@ function rmDragMove(e) {
   rmDrag.cur = { ns, ne };
   const l = rmPct(ns), w = Math.max(0.6, rmPct(ne) - rmPct(ns));
   rmDrag.bar.style.left = l + '%'; rmDrag.bar.style.width = w + '%';
-  if (rmDrag.tip) { const txt = rmDrag.mode === 'l' ? ('Start ' + ns) : rmDrag.mode === 'r' ? ('End ' + ne) : (ns + '  →  ' + ne); rmDrag.tip.textContent = txt; rmDrag.tip.style.left = (e.clientX + 14) + 'px'; rmDrag.tip.style.top = (e.clientY - 8) + 'px'; rmDrag.tip.style.display = 'block'; }
+  if (rmDrag.tip) { const txt = rmDrag.mode === 'l' ? ('Start ' + rmFmtDate(ns)) : rmDrag.mode === 'r' ? ('End ' + rmFmtDate(ne)) : (rmFmtDate(ns) + '  →  ' + rmFmtDate(ne)); rmDrag.tip.textContent = txt; rmDrag.tip.style.left = (e.clientX + 14) + 'px'; rmDrag.tip.style.top = (e.clientY - 8) + 'px'; rmDrag.tip.style.display = 'block'; }
 }
 function rmDragEnd() {
   if (!rmDrag) return;
@@ -4805,7 +4810,7 @@ function rmPrint() {
     (s.groups || []).forEach(g => {
       if (g.name) body += `<div class="grp">${g.name}</div>`;
       (g.lanes || []).forEach(ln => {
-        const bars = (ln.bars || []).map(b => { const l = rmPct(b.start), w = Math.max(0.6, rmPct(b.end) - rmPct(b.start)); return `<div class="bar" style="left:${l}%;width:${w}%;background:${rmCatColor(b.cat)}">${b.label || ''}</div>`; }).join('');
+        const bars = (ln.bars || []).map(b => { const l = rmPct(b.start), w = Math.max(0.6, rmPct(b.end) - rmPct(b.start)); return `<div class="bar" style="left:${l}%;width:${w}%;background:${b.color || rmCatColor(b.cat)}">${b.label || ''}</div>`; }).join('');
         const tl = todayPct > 0 && todayPct < 100 ? `<div class="today" style="left:${todayPct}%"></div>` : '';
         body += `<div class="row"><div class="lbl">${ln.name || ''}</div><div class="trk"${(laneIdx++ % 2) ? ' style="background:#FAFBFC"' : ''}>${tl}${bars}</div></div>`;
       });

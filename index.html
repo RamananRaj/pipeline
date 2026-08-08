@@ -4516,7 +4516,9 @@ function rmCatName(c) { const f = RM_CATS.find(x => x[0] === c); return f ? f[1]
 function rmId() { return Date.now() * 1000 + Math.floor(Math.random() * 1000); }
 function rmPct(dateStr) { if (!dateStr) return 0; const d = new Date(dateStr + 'T00:00:00Z'); const days = (d - GSTART) / 86400000; return Math.max(0, Math.min(100, days / GTOTAL * 100)); }
 const RM_DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const RM_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 function rmFmtDate(iso) { if (!iso) return ''; return RM_DOW[new Date(iso + 'T00:00:00Z').getUTCDay()] + ' ' + iso; }
+function rmFmtShort(iso) { if (!iso) return ''; const d = new Date(iso + 'T00:00:00Z'); return d.getUTCDate() + ' ' + RM_MON[d.getUTCMonth()] + ' ' + d.getUTCFullYear(); }
 function rmFindSection(sid) { return roadmap.sections.find(s => s.id === sid); }
 function rmFindBar(sid, gid, lid, bid) { const s = rmFindSection(sid); const g = s && s.groups.find(x => x.id === gid); const ln = g && g.lanes.find(x => x.id === lid); const b = ln && (ln.bars || []).find(x => x.id === bid); return { s, g, ln, b }; }
 
@@ -4714,7 +4716,7 @@ function renderRoadmap() {
 
   const mss = (roadmap.milestones || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
   const msH = 64;
-  const msHtml = mss.map((m, i) => { const l = rmPct(m.date); const tier = (i % 3) * 18; const lineH = msH - tier - 12; return `<div data-rmms data-mid="${m.id}" title="${String(m.label || '').replace(/"/g, '&quot;')} · ${rmFmtDate(m.date)} — drag to move, click to edit" style="position:absolute;left:${l}%;top:${tier}px;cursor:grab;user-select:none;white-space:nowrap"><div style="font-size:9.5px;color:#0F2544;pointer-events:none"><span style="color:#EA580C;font-weight:800">▶</span> ${m.label || ''}</div><div style="position:absolute;left:0;top:12px;width:1.5px;height:${lineH}px;background:#F59E0B;opacity:.5;pointer-events:none"></div><div class="rmms-date" style="display:none;position:absolute;left:0;top:-15px;font-size:9px;font-weight:700;color:#7c2d12;background:#FEF3C7;border:1px solid #FCD34D;padding:0 4px;border-radius:4px;pointer-events:none"></div></div>`; }).join('');
+  const msHtml = mss.map((m, i) => { const l = rmPct(m.date); const tier = (i % 3) * 18; const lineH = msH - tier - 12; return `<div data-rmms data-mid="${m.id}" title="${String(m.label || '').replace(/"/g, '&quot;')} · ${rmFmtDate(m.date)} — drag to move, click to edit" style="position:absolute;left:${l}%;top:${tier}px;cursor:grab;user-select:none;white-space:nowrap"><div style="font-size:9.5px;color:#0F2544;pointer-events:none"><span style="color:#EA580C;font-weight:800">▶</span> ${m.label || ''} <span style="color:#94A3B8;font-weight:400">· ${rmFmtShort(m.date)}</span></div><div style="position:absolute;left:0;top:12px;width:1.5px;height:${lineH}px;background:#F59E0B;opacity:.5;pointer-events:none"></div><div class="rmms-date" style="display:none;position:absolute;left:0;top:-15px;font-size:9px;font-weight:700;color:#7c2d12;background:#FEF3C7;border:1px solid #FCD34D;padding:0 4px;border-radius:4px;pointer-events:none"></div></div>`; }).join('');
 
   let body = '', laneIdx = 0;
   roadmap.sections.forEach(s => {
@@ -4821,7 +4823,7 @@ function rmPrint() {
   const todayPct = rmPct(new Date().toISOString().slice(0, 10));
   const axis = GMONTHS.map(g => { const ms = Date.UTC(g.y, g.m, 1), me = Date.UTC(g.y, g.m + 1, 0); const w = ((me - ms) / 86400000 + 1) / GTOTAL * 100; const wk = Math.max(1, Math.round((me - GSTART) / (7 * 86400000))); return `<div class="mc" style="width:${w}%">${g.label}<div class="wk">W${wk}</div></div>`; }).join('');
   const mss = (roadmap.milestones || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-  const msHtml = mss.map((m, i) => { const l = rmPct(m.date); const tier = (i % 3) * 16; return `<div class="ms" style="left:${l}%;top:${tier}px"><span class="fl">▶</span> ${m.label || ''}</div><div class="msl" style="left:${l}%;top:${tier + 11}px"></div>`; }).join('');
+  const msHtml = mss.map((m, i) => { const l = rmPct(m.date); const tier = (i % 3) * 16; return `<div class="ms" style="left:${l}%;top:${tier}px"><span class="fl">▶</span> ${m.label || ''} <span style="color:#94A3B8">· ${rmFmtShort(m.date)}</span></div><div class="msl" style="left:${l}%;top:${tier + 11}px"></div>`; }).join('');
   let body = '', laneIdx = 0;
   roadmap.sections.forEach(s => {
     body += `<div class="sec" style="background:${s.color || '#1F3864'}">${s.name || ''}</div>`;

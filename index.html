@@ -4570,13 +4570,28 @@ function uiConfirm(title, message, onYes, yesLabel) {
 function rmAddSection() { uiModal('New section', [{ id: 'name', label: 'Section heading', placeholder: 'e.g. Track 1: Build & Test' }, { id: 'color', label: 'Colour', type: 'color', value: '#1F3864' }], 'Add section', v => { if (!v.name.trim()) return; roadmap.sections.push({ id: rmId(), name: v.name.trim(), color: v.color || '#1F3864', groups: [{ id: rmId(), name: '', lanes: [] }] }); persistRoadmap(); renderRoadmap(); }); }
 function rmEditSection(sid) { const s = rmFindSection(sid); if (!s) return; uiModal('Edit section', [{ id: 'name', label: 'Section heading', value: s.name }, { id: 'color', label: 'Colour', type: 'color', value: s.color || '#1F3864' }], 'Save', v => { s.name = v.name.trim(); if (v.color) s.color = v.color; persistRoadmap(); renderRoadmap(); }); }
 function rmDelSection(sid) { uiConfirm('Delete section', 'Delete this section and everything in it?', () => { roadmap.sections = roadmap.sections.filter(s => s.id !== sid); persistRoadmap(); renderRoadmap(); }); }
-function rmAddGroup(sid) { const s = rmFindSection(sid); if (!s) return; uiModal('New sub-section', [{ id: 'name', label: 'Sub-section heading', placeholder: 'e.g. Testing' }], 'Add', v => { if (!v.name.trim()) return; s.groups.push({ id: rmId(), name: v.name.trim(), lanes: [] }); persistRoadmap(); renderRoadmap(); }); }
-function rmEditGroup(sid, gid) { const s = rmFindSection(sid); const g = s && s.groups.find(x => x.id === gid); if (!g) return; uiModal('Edit sub-section', [{ id: 'name', label: 'Sub-section heading', value: g.name }], 'Save', v => { g.name = v.name.trim(); persistRoadmap(); renderRoadmap(); }); }
-function rmDelGroup(sid, gid) { const s = rmFindSection(sid); if (!s) return; uiConfirm('Delete sub-section', 'Delete this sub-section and its lanes?', () => { s.groups = s.groups.filter(g => g.id !== gid); persistRoadmap(); renderRoadmap(); }); }
-function rmAddLaneToSection(sid) { const s = rmFindSection(sid); if (!s) return; if (!s.groups.length) s.groups.push({ id: rmId(), name: '', lanes: [] }); const g = s.groups[0]; uiModal('New swimlane', [{ id: 'name', label: 'Swimlane name', placeholder: 'e.g. Build' }], 'Add', v => { if (v.name === '') return; g.lanes.push({ id: rmId(), name: v.name.trim(), bars: [] }); persistRoadmap(); renderRoadmap(); }); }
-function rmAddLane(sid, gid) { const s = rmFindSection(sid); const g = s && s.groups.find(x => x.id === gid); if (!g) return; uiModal('New swimlane', [{ id: 'name', label: 'Swimlane name', placeholder: 'e.g. SIT' }], 'Add', v => { if (v.name === '') return; g.lanes.push({ id: rmId(), name: v.name.trim(), bars: [] }); persistRoadmap(); renderRoadmap(); }); }
-function rmEditLane(sid, gid, lid) { const { ln } = rmFindBar(sid, gid, lid); if (!ln) return; uiModal('Rename swimlane', [{ id: 'name', label: 'Swimlane name', value: ln.name }], 'Save', v => { ln.name = v.name.trim(); persistRoadmap(); renderRoadmap(); }); }
-function rmDelLane(sid, gid, lid) { const s = rmFindSection(sid); const g = s && s.groups.find(x => x.id === gid); if (!g) return; uiConfirm('Delete swimlane', 'Delete this swimlane and its bars?', () => { g.lanes = g.lanes.filter(l => l.id !== lid); persistRoadmap(); renderRoadmap(); }); }
+function rmAddGroup(sid) { const s = rmFindSection(sid); if (!s) return; uiModal('New swimlane', [{ id: 'name', label: 'Swimlane name', placeholder: 'e.g. Design' }], 'Add', v => { if (!v.name.trim()) return; s.groups.push({ id: rmId(), name: v.name.trim(), lanes: [] }); persistRoadmap(); renderRoadmap(); }); }
+function rmEditGroup(sid, gid) { const s = rmFindSection(sid); const g = s && s.groups.find(x => x.id === gid); if (!g) return; uiModal('Edit swimlane', [{ id: 'name', label: 'Swimlane name', value: g.name }], 'Save', v => { g.name = v.name.trim(); persistRoadmap(); renderRoadmap(); }); }
+function rmDelGroup(sid, gid) { const s = rmFindSection(sid); if (!s) return; uiConfirm('Delete swimlane', 'Delete this swimlane and its sub-lanes?', () => { s.groups = s.groups.filter(g => g.id !== gid); persistRoadmap(); renderRoadmap(); }); }
+function rmAddLaneToSection(sid) { const s = rmFindSection(sid); if (!s) return; if (!s.groups.length) s.groups.push({ id: rmId(), name: '', lanes: [] }); const g = s.groups[0]; uiModal('New sub-lane', [{ id: 'name', label: 'Sub-lane name', placeholder: 'e.g. CRM/Sales' }], 'Add', v => { if (v.name === '') return; g.lanes.push({ id: rmId(), name: v.name.trim(), bars: [] }); persistRoadmap(); renderRoadmap(); }); }
+function rmAddLane(sid, gid) { const s = rmFindSection(sid); const g = s && s.groups.find(x => x.id === gid); if (!g) return; uiModal('New sub-lane', [{ id: 'name', label: 'Sub-lane name', placeholder: 'e.g. Bills / Payments' }], 'Add', v => { if (v.name === '') return; g.lanes.push({ id: rmId(), name: v.name.trim(), bars: [] }); persistRoadmap(); renderRoadmap(); }); }
+function rmEditLane(sid, gid, lid) {
+  const { s, ln } = rmFindBar(sid, gid, lid); if (!ln || !s) return;
+  const opts = (s.groups || []).map(gr => [String(gr.id), gr.name ? gr.name : '(top level — no swimlane)']);
+  uiModal('Edit sub-lane', [
+    { id: 'name', label: 'Sub-lane name', value: ln.name },
+    { id: 'grp', label: 'Inside swimlane', type: 'select', value: String(gid), options: opts }
+  ], 'Save', v => {
+    ln.name = v.name.trim();
+    const tg = +v.grp;
+    if (tg && tg !== gid) {
+      const cur = s.groups.find(x => x.id === gid), tgt = s.groups.find(x => x.id === tg);
+      if (cur && tgt) { const idx = cur.lanes.findIndex(l => l.id === lid); if (idx >= 0) tgt.lanes.push(cur.lanes.splice(idx, 1)[0]); }
+    }
+    persistRoadmap(); renderRoadmap();
+  });
+}
+function rmDelLane(sid, gid, lid) { const s = rmFindSection(sid); const g = s && s.groups.find(x => x.id === gid); if (!g) return; uiConfirm('Delete sub-lane', 'Delete this sub-lane and its bars?', () => { g.lanes = g.lanes.filter(l => l.id !== lid); persistRoadmap(); renderRoadmap(); }); }
 function rmMoveSection(sid, dir) {
   const i = roadmap.sections.findIndex(s => s.id === sid); const j = i + dir;
   if (i < 0 || j < 0 || j >= roadmap.sections.length) return;
@@ -4728,9 +4743,9 @@ function renderRoadmap() {
     const collapsed = rmCollapsed.has(s.id);
     body += `<div style="display:flex;align-items:center;background:${s.color || '#1F3864'};color:#fff;font-size:11px;font-weight:800;padding:5px 8px">
       <div style="flex:1;display:flex;align-items:center;gap:7px;min-width:0"><span onclick="rmToggleCollapse(${s.id})" style="cursor:pointer;user-select:none" title="Collapse / expand track">${collapsed ? '▸' : '▾'}</span><span onclick="rmEditSection(${s.id})" style="cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="Click to rename this section">${s.name || 'Section'}</span></div>
-      ${btn(`rmMoveSection(${s.id},-1)`, '▲')}${btn(`rmMoveSection(${s.id},1)`, '▼')}${btn(`rmDupSection(${s.id})`, '⧉')}${btn(`rmAddLaneToSection(${s.id})`, '+ Lane')}${btn(`rmAddGroup(${s.id})`, '+ Sub-section')}${btn(`rmEditSection(${s.id})`, '✎ Rename')}${btn(`rmDelSection(${s.id})`, '×')}</div>`;
+      ${btn(`rmMoveSection(${s.id},-1)`, '▲')}${btn(`rmMoveSection(${s.id},1)`, '▼')}${btn(`rmDupSection(${s.id})`, '⧉')}${btn(`rmAddGroup(${s.id})`, '+ Swimlane')}${btn(`rmAddLaneToSection(${s.id})`, '+ Sub-lane')}${btn(`rmEditSection(${s.id})`, '✎ Rename')}${btn(`rmDelSection(${s.id})`, '×')}</div>`;
     if (!collapsed) (s.groups || []).forEach(g => {
-      if (g.name) body += `<div style="display:flex;align-items:center;background:#EEF2F7;color:#334155;font-size:10.5px;font-weight:700;padding:3px 8px 3px 18px"><div style="flex:1;cursor:pointer" onclick="rmEditGroup(${s.id},${g.id})" title="Click to rename this sub-section">${g.name}</div>${laneBtn(`rmAddLane(${s.id},${g.id})`, '+ Lane')} <span style="width:5px"></span>${laneBtn(`rmEditGroup(${s.id},${g.id})`, '✎')}${laneBtn(`rmDelGroup(${s.id},${g.id})`, '×', '#DC2626')}</div>`;
+      if (g.name) body += `<div style="display:flex;align-items:center;background:#EEF2F7;color:#334155;font-size:10.5px;font-weight:700;padding:3px 8px 3px 18px"><div style="flex:1;cursor:pointer" onclick="rmEditGroup(${s.id},${g.id})" title="Click to rename this sub-section">${g.name}</div>${laneBtn(`rmAddLane(${s.id},${g.id})`, '+ Sub-lane')} <span style="width:5px"></span>${laneBtn(`rmEditGroup(${s.id},${g.id})`, '✎')}${laneBtn(`rmDelGroup(${s.id},${g.id})`, '×', '#DC2626')}</div>`;
       (g.lanes || []).forEach(ln => {
         const bars = (ln.bars || []).map(b => { const l = rmPct(b.start), w = Math.max(0.6, rmPct(b.end) - rmPct(b.start)); return `<div data-rmbar data-sid="${s.id}" data-gid="${g.id}" data-lid="${ln.id}" data-bid="${b.id}" title="${String(b.label || '').replace(/"/g, '&quot;')} (${rmFmtDate(b.start)} → ${rmFmtDate(b.end)}) — drag to move, edges to resize, click to edit" style="position:absolute;top:4px;left:${l}%;width:${w}%;height:16px;background:${b.color || rmCatColor(b.cat)};border-radius:3px;color:#fff;font-size:9px;font-weight:700;line-height:16px;overflow:hidden;white-space:nowrap;cursor:grab;user-select:none"><span data-rmh="l" style="position:absolute;left:0;top:0;bottom:0;width:6px;cursor:col-resize"></span><span style="display:block;padding:0 7px;pointer-events:none;overflow:hidden;text-overflow:ellipsis">${b.label || ''}</span><span data-rmh="r" style="position:absolute;right:0;top:0;bottom:0;width:6px;cursor:col-resize"></span></div>`; }).join('');
         body += `<div style="display:flex;border-bottom:1px solid #EEF2F7;min-height:26px">
@@ -4761,7 +4776,7 @@ function renderRoadmap() {
       <div style="min-width:${Math.max(900, GMONTHS.length * 46 + LBL)}px">
         <div style="position:relative;height:64px;margin-left:${LBL}px;border-bottom:1px solid #EEF2F7">${msHtml}</div>
         <div style="display:flex;background:#0F2544;color:#fff">
-          <div style="width:${LBL}px;flex:none;font-size:10px;color:#cbd5e1;display:flex;align-items:center;padding:0 8px">Section / Swimlane</div>
+          <div style="width:${LBL}px;flex:none;font-size:10px;color:#cbd5e1;display:flex;align-items:center;padding:0 8px">Swimlane / Sub-lane</div>
           <div style="flex:1;display:flex">${axis}</div>
         </div>
         ${body}

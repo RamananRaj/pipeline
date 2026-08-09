@@ -3595,18 +3595,21 @@ function genDomainPoolPanel() {
   let maxHead = 1; entries.forEach(([, v]) => mk.forEach(mo => { maxHead = Math.max(maxHead, v.monthly[mo.key] || 0); }));
   const fmt = n => Math.round(n).toLocaleString();
   const spark = v => `<div style="display:flex;align-items:flex-end;justify-content:flex-end;gap:1px;height:22px">${mk.map(mo => { const c = v.monthly[mo.key] || 0; const h = Math.max(1, Math.round(c / maxHead * 22)); return `<div title="${mo.label}: ${c} working" style="width:6px;height:${h}px;background:${c ? '#2563EB' : '#E2E8F0'};border-radius:1px"></div>`; }).join('')}</div>`;
-  const tot = entries.reduce((s, [, v]) => ({ head: s.head + v.head, fc: s.fc + v.fc, ac: s.ac + v.ac, rem: s.rem + v.rem }), { head: 0, fc: 0, ac: 0, rem: 0 });
-  const body = entries.map(([d, v]) => {
-    const open = genPoolExpanded.has(d); const enc = encodeURIComponent(d);
+  const q = (resSearch || '').toLowerCase();
+  const shownEntries = q ? entries.filter(([, v]) => v.people.some(p => (p.name || '').toLowerCase().includes(q))) : entries;
+  const tot = shownEntries.reduce((s, [, v]) => ({ head: s.head + v.head, fc: s.fc + v.fc, ac: s.ac + v.ac, rem: s.rem + v.rem }), { head: 0, fc: 0, ac: 0, rem: 0 });
+  const body = shownEntries.map(([d, v]) => {
+    const open = q ? true : genPoolExpanded.has(d); const enc = encodeURIComponent(d);
     const nameCell = `<td style="font-weight:600"><span onclick="genPoolToggle('${enc}')" style="cursor:pointer;user-select:none" title="Show the people behind this domain"><span style="color:#94A3B8;margin-right:6px">${open ? '▾' : '▸'}</span>${d}</span></td>`;
     const main = `<tr>${nameCell}<td style="text-align:right">${v.head}</td><td style="text-align:right">${fmt(v.fc)}</td><td style="text-align:right;font-weight:600">${fmt(v.ac)}</td><td style="text-align:right">${fmt(v.rem)}</td><td>${spark(v)}</td></tr>`;
     let detail = '';
     if (open) {
-      const people = v.people.slice().sort((a, b) => b.fc - a.fc).map(p => `<tr style="${p.active ? '' : 'opacity:.5'}"><td style="padding:2px 8px;font-size:11px">${p.name}</td><td style="font-size:11px;color:#64748B">${p.role}</td><td style="text-align:right;font-size:11px">${fmt(p.fc)}</td><td style="text-align:right;font-size:11px;font-weight:600">${fmt(p.ac)}</td><td style="text-align:right;font-size:11px">${p.ot > 0 ? `<span style="color:#B45309;font-weight:700">⚑ ${fmt(p.ot)}</span>` : '<span style="color:#CBD5E1">—</span>'}</td></tr>`).join('');
-      detail = `<tr><td colspan="6" style="background:#F8FAFC;padding:8px 12px 10px 30px"><table style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;font-size:10px;color:#94A3B8;padding:2px 8px;text-transform:uppercase;letter-spacing:.3px">Resource (${v.people.length})</th><th style="text-align:left;font-size:10px;color:#94A3B8">Role</th><th style="text-align:right;font-size:10px;color:#94A3B8">Forecast</th><th style="text-align:right;font-size:10px;color:#94A3B8">Actual</th><th style="text-align:right;font-size:10px;color:#94A3B8">OT</th></tr></thead><tbody>${people}</tbody></table></td></tr>`;
+      const peeps = (q ? v.people.filter(p => (p.name || '').toLowerCase().includes(q)) : v.people).slice().sort((a, b) => b.fc - a.fc);
+      const people = peeps.map(p => `<tr style="${p.active ? '' : 'opacity:.5'}${q ? ';background:#FEF9C3' : ''}"><td style="padding:2px 8px;font-size:11px">${p.name}</td><td style="font-size:11px;color:#64748B">${p.role}</td><td style="text-align:right;font-size:11px">${fmt(p.fc)}</td><td style="text-align:right;font-size:11px;font-weight:600">${fmt(p.ac)}</td><td style="text-align:right;font-size:11px">${p.ot > 0 ? `<span style="color:#B45309;font-weight:700">⚑ ${fmt(p.ot)}</span>` : '<span style="color:#CBD5E1">—</span>'}</td></tr>`).join('');
+      detail = `<tr><td colspan="6" style="background:#F8FAFC;padding:8px 12px 10px 30px"><table style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;font-size:10px;color:#94A3B8;padding:2px 8px;text-transform:uppercase;letter-spacing:.3px">Resource (${peeps.length}${q ? ' of ' + v.people.length : ''})</th><th style="text-align:left;font-size:10px;color:#94A3B8">Role</th><th style="text-align:right;font-size:10px;color:#94A3B8">Forecast</th><th style="text-align:right;font-size:10px;color:#94A3B8">Actual</th><th style="text-align:right;font-size:10px;color:#94A3B8">OT</th></tr></thead><tbody>${people}</tbody></table></td></tr>`;
     }
     return main + detail;
-  }).join('');
+  }).join('') || `<tr><td colspan="6" style="text-align:center;color:#94A3B8;padding:16px">No resources match “${resSearch}”.</td></tr>`;
   return `<div class="res-card"><div class="res-card-title">Genesis resource pool — by Domain <span class="res-hint">click a domain to expand the people behind the forecast &amp; who's on overtime · bars = people working per month</span></div>
     <table class="dtable"><thead><tr><th>Domain</th><th style="text-align:right">Head</th><th style="text-align:right">Forecast</th><th style="text-align:right">Actual</th><th style="text-align:right">Remaining</th><th style="text-align:right">Headcount / month</th></tr></thead>
     <tbody>${body}<tr style="border-top:2px solid #E2E8F0;font-weight:700"><td>Total</td><td style="text-align:right">${tot.head}</td><td style="text-align:right">${fmt(tot.fc)}</td><td style="text-align:right">${fmt(tot.ac)}</td><td style="text-align:right">${fmt(tot.rem)}</td><td></td></tr></tbody></table></div>`;
@@ -3624,7 +3627,7 @@ function genDashboardHTML() {
   const maxV = Math.max(1, ...monthly.map(m => Math.max(m.f, m.a)));
   const bars = `<div style="display:flex;align-items:flex-end;gap:8px;height:170px;padding-top:6px">${monthly.map(m => { const fh = Math.round(m.f / maxV * 150), ah = Math.round(m.a / maxV * 150); return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:5px"><div style="display:flex;align-items:flex-end;gap:3px;height:152px"><div title="forecast ${fmt(m.f)} md" style="width:14px;height:${fh}px;background:#CBD5E1;border-radius:3px 3px 0 0"></div>${m.a > 0 ? `<div title="actual ${fmt(m.a)} md" style="width:14px;height:${ah}px;background:#2563EB;border-radius:3px 3px 0 0"></div>` : ''}</div><div style="font-size:10px;color:#94A3B8">${m.mo.label}</div></div>`; }).join('')}</div>`;
   return `
-    <div style="margin-bottom:18px"><div style="font-size:20px;font-weight:800;color:#0F2544">Genesis — Programme Dashboard</div><div style="font-size:12px;color:#64748B;margin-top:2px">Resourcing forecast vs actual &amp; resource pool by domain</div></div>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:18px"><div><div style="font-size:20px;font-weight:800;color:#0F2544">Genesis — Programme Dashboard</div><div style="font-size:12px;color:#64748B;margin-top:2px">Resourcing forecast vs actual &amp; resource pool by domain</div></div><input id="resSearchInput" value="${resSearch.replace(/"/g, '&quot;')}" oninput="resSetSearch(this.value)" placeholder="🔍 Search name…" style="padding:6px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:12px;min-width:160px"></div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px">
       ${kpi('Forecast (total)', fmt(T.fTot), 'man-days in window', '#0F2544')}
       ${kpi('Actual to date', fmt(T.aEl), 'of ' + fmt(T.fEl) + ' planned (elapsed)', '#2563EB')}
@@ -4403,7 +4406,7 @@ function renderResourcingView() {
 let resGrid = false;
 function resToggleGrid() { resGrid = !resGrid; renderResourcingView(); }
 let resSearch = '';
-function resSetSearch(v) { resSearch = v; renderResourcingView(); const el = document.getElementById('resSearchInput'); if (el) { el.focus(); const val = el.value; el.value = ''; el.value = val; } }
+function resSetSearch(v) { resSearch = v; if (viewMode === 'dashboard') renderDashboardView(); else renderResourcingView(); const el = document.getElementById('resSearchInput'); if (el) { el.focus(); const val = el.value; el.value = ''; el.value = val; } }
 let _resGridTimer = null;
 function resGridSet(id, wk, val) {
   const r = (resourcing.rows || []).find(x => x.id === id); if (!r) return;

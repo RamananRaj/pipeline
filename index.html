@@ -4687,8 +4687,11 @@ function _resMapImport(arr, mode) {
     if (weekly) { const wf = field === 'actual' ? 'actualWk' : 'forecastWk'; rec[wf] = rec[wf] || {}; Object.keys(accWk).forEach(mk => { rec[wf][mk] = accWk[mk]; }); }
     n++;
   }
+  // Auto-extend the timeline horizon to cover any imported months beyond the current window (so nothing is clipped)
+  let hExt = false;
+  if (dcols.length) { const maxD = dcols.reduce((mx, [, d]) => d > mx ? d : mx, dcols[0][1]); const need = (maxD.getFullYear() - HORIZON.year) * 12 + (maxD.getMonth() - HORIZON.month) + 1; if (need > HORIZON.count) { HORIZON = { year: HORIZON.year, month: HORIZON.month, count: Math.min(60, need) }; localStorage.setItem(KP + 'horizon', JSON.stringify(HORIZON)); rebuildHorizon(); hExt = true; } }
   persistResourcing(); renderResourcingView();
-  alert('Imported ' + n + ' rows into "' + field + '" — hours converted to man-days at 7.5 h/day (37.5 h/week).' + (weekly && otAny ? ' Hours over 37.5/week are flagged as overtime.' : ''));
+  alert('Imported ' + n + ' rows into "' + field + '" — hours converted to man-days at 7.5 h/day (37.5 h/week).' + (weekly && otAny ? ' Hours over 37.5/week are flagged as overtime.' : '') + (hExt ? '\nTimeline horizon extended to cover the imported months.' : ''));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

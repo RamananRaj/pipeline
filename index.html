@@ -4371,11 +4371,18 @@ function resToggleGrid() { resGrid = !resGrid; renderResourcingView(); }
 let _resGridTimer = null;
 function resGridSet(id, wk, val) {
   const r = (resourcing.rows || []).find(x => x.id === id); if (!r) return;
+  const w = resWeeks().find(x => x.key === wk); if (!w) return;
   r.forecastWk = r.forecastWk || {};
+  // First weekly edit in a month that only had a monthly figure → seed the other weeks from the spread so the month total is preserved
+  const mw = resWeeks().filter(x => x.monthKey === w.monthKey);
+  const anyExplicit = mw.some(x => r.forecastWk[x.key] != null);
+  let seeded = false;
+  if (!anyExplicit) { const md = +((r.forecast || {})[w.monthKey] || 0); if (md > 0) { const per = +(md * 7.5 / mw.length).toFixed(2); mw.forEach(x => { r.forecastWk[x.key] = per; }); seeded = true; } }
   const t = String(val).trim();
   if (t === '') delete r.forecastWk[wk]; else { const n = parseFloat(t); if (!isNaN(n)) r.forecastWk[wk] = n; }
-  const w = resWeeks().find(x => x.key === wk); if (w) resRecalcMonthFromWeeks(r, w.monthKey);
+  resRecalcMonthFromWeeks(r, w.monthKey);
   clearTimeout(_resGridTimer); _resGridTimer = setTimeout(() => { localStorage.setItem(KP + 'resourcing', JSON.stringify(resourcing)); pushCloud(); }, 600);
+  if (seeded) renderResourcingView();
 }
 function resGridHTML() {
   const rows = resourcing.rows || [];
@@ -4383,14 +4390,15 @@ function resGridHTML() {
   const WK = resWeeks();
   const byMo = {}; WK.forEach(w => { (byMo[w.monthKey] = byMo[w.monthKey] || []).push(w); });
   const months = Object.keys(byMo);
+  const wkCount = {}; months.forEach(k => wkCount[k] = byMo[k].length);
   const monLabel = k => { const g = GMONTHS.find(x => (x.y + '-' + String(x.m + 1).padStart(2, '0')) === k); return g ? g.label : k; };
   const NAMEW = 190, CELLW = 46;
   const monthHead = months.map(k => `<th colspan="${byMo[k].length}" style="position:sticky;top:0;z-index:5;background:#0F2544;color:#fff;font-size:10px;font-weight:700;padding:4px 0;border-right:1px solid #22375a;text-align:center">${monLabel(k)}</th>`).join('');
   const weekHead = WK.map(w => `<th style="position:sticky;top:22px;z-index:4;background:#13315c;color:#cbd5e1;font-size:8.5px;font-weight:600;padding:3px 0;min-width:${CELLW}px;border-right:1px solid #22375a;text-align:center">${w.label}</th>`).join('');
   const body = rows.slice(0, 300).map((r, i) => {
     const off = r.active === false;
-    const fcells = WK.map(w => { const v = (r.forecastWk || {})[w.key]; return `<td style="padding:0;border-right:1px solid #F1F5F9"><input type="number" min="0" step="0.5" value="${v != null ? v : ''}" onchange="resGridSet(${r.id},'${w.key}',this.value)" title="Forecast hours" style="width:${CELLW}px;height:22px;border:none;text-align:center;font-size:11px;background:transparent;color:#0F2544"></td>`; }).join('');
-    const acells = WK.map(w => { const a = (r.actualWk || {})[w.key]; const over = a != null && a > 37.5; return `<td style="padding:0;border-right:1px solid #F1F5F9;text-align:center;font-size:9.5px;font-weight:700;color:${a == null ? '#CBD5E1' : over ? '#B45309' : '#0F766E'};background:#FAFBFC">${a != null ? a : '·'}</td>`; }).join('');
+    const fcells = WK.map(w => { const ex = (r.forecastWk || {})[w.key]; const md = +((r.forecast || {})[w.monthKey] || 0); const der = md > 0 ? +(md * 7.5 / wkCount[w.monthKey]).toFixed(1) : ''; const val = ex != null ? ex : der; const grey = ex == null && der !== ''; return `<td style="padding:0;border-right:1px solid #F1F5F9"><input type="number" min="0" step="0.5" value="${val !== '' && val != null ? val : ''}" onchange="resGridSet(${r.id},'${w.key}',this.value)" title="Forecast hours${grey ? ' (spread from the monthly forecast — type to set weekly)' : ''}" style="width:${CELLW}px;height:22px;border:none;text-align:center;font-size:11px;background:transparent;color:${grey ? '#94A3B8' : '#0F2544'}"></td>`; }).join('');
+    const acells = WK.map(w => { const ex = (r.actualWk || {})[w.key]; const md = +((r.actual || {})[w.monthKey] || 0); const der = md > 0 ? +(md * 7.5 / wkCount[w.monthKey]).toFixed(1) : null; const a = ex != null ? ex : der; const over = a != null && a > 37.5; const col = a == null ? '#CBD5E1' : over ? '#B45309' : ex == null ? '#94A3B8' : '#0F766E'; return `<td style="padding:0;border-right:1px solid #F1F5F9;text-align:center;font-size:9.5px;font-weight:700;color:${col};background:#FAFBFC">${a != null ? a : '·'}</td>`; }).join('');
     const nameCell = `<td rowspan="2" style="position:sticky;left:0;z-index:3;background:${off ? '#F1F5F9' : '#F8FAFC'};border-right:1px solid #E2E8F0;padding:2px 8px;min-width:${NAMEW}px;max-width:${NAMEW}px;${off ? 'opacity:.55' : ''}"><div onclick="resOpenDetail(${i})" title="Open resource details" style="cursor:pointer;font-size:11px;font-weight:500;color:#0F2544;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.name || '—'}</div><div style="font-size:9px;color:#94A3B8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${[r.role, r.domain].filter(Boolean).join(' · ')}</div></td>`;
     return `<tr>${nameCell}<td style="position:sticky;left:${NAMEW}px;z-index:3;background:#EFF6FF;color:#2563EB;font-size:8px;font-weight:800;padding:0 4px;border-right:1px solid #E2E8F0">F</td>${fcells}</tr><tr><td style="position:sticky;left:${NAMEW}px;z-index:3;background:#F0FDF4;color:#0F766E;font-size:8px;font-weight:800;padding:0 4px;border-right:1px solid #E2E8F0">A</td>${acells}</tr>`;
   }).join('');
@@ -4550,13 +4558,13 @@ function _resMapImport(arr, mode) {
       if (weekly) { acc[k] = (acc[k] || 0) + num; const ot = Math.max(0, num - WEEK_CAP); if (ot > 0) { accOT[k] = (accOT[k] || 0) + ot; otAny = true; } const mk = resMondayKey(d); accWk[mk] = (accWk[mk] || 0) + num; }
       else { acc[k] = (acc[k] || 0) + num; }
     });
-    Object.keys(acc).forEach(k => { rec[field][k] = weekly ? +(acc[k] / HRS_PER_DAY).toFixed(2) : acc[k]; });
+    Object.keys(acc).forEach(k => { rec[field][k] = +(acc[k] / HRS_PER_DAY).toFixed(2); });   // hours → man-days (monthly & weekly are both hours)
     if (weekly && field === 'actual') { rec.overtime = rec.overtime || {}; Object.keys(accOT).forEach(k => { rec.overtime[k] = +(accOT[k] / HRS_PER_DAY).toFixed(2); }); }
     if (weekly) { const wf = field === 'actual' ? 'actualWk' : 'forecastWk'; rec[wf] = rec[wf] || {}; Object.keys(accWk).forEach(mk => { rec[wf][mk] = accWk[mk]; }); }
     n++;
   }
   persistResourcing(); renderResourcingView();
-  alert('Imported ' + n + ' rows into "' + field + '"' + (weekly ? ' — weekly hours rolled up to man-days (37.5 h/week = 5 days).' + (otAny ? ' Hours over 37.5/week are included in Actual and flagged as overtime.' : '') : '.'));
+  alert('Imported ' + n + ' rows into "' + field + '" — hours converted to man-days at 7.5 h/day (37.5 h/week).' + (weekly && otAny ? ' Hours over 37.5/week are flagged as overtime.' : ''));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

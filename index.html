@@ -5247,7 +5247,7 @@ function scRender() {
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px">
       ${kpi('Baseline effort', fmt(tMd) + ' MD')}
       ${kpi('AI-adjusted', fmt(tAdj) + ' MD', '#2563EB')}
-      ${kpi('AI saving', fmt(tMd - tAdj) + ' MD', '#0F766E')}
+      ${kpi('AI saving', fmt(tMd - tAdj) + ' MD <span style="font-size:14px;color:#94A3B8;font-weight:700">· ' + (tMd > 0 ? Math.round((tMd - tAdj) / tMd * 100) : 0) + '%</span>', '#0F766E')}
       ${kpi('User stories', fmt(tStories))}
       ${kpi('Complete', tPct + '%')}
     </div>

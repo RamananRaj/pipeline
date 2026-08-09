@@ -303,6 +303,7 @@ body.drag-active *{cursor:grabbing!important;user-select:none;}
       <button class="vtab" onclick="setView('sizing',this)">👕 Sizing</button>
       <button class="vtab" id="tabResourcing" onclick="setView('resourcing',this)" style="display:none">💷 Resourcing</button>
       <button class="vtab" id="tabRoadmap" onclick="setView('roadmap',this)" style="display:none">🗺 Roadmap</button>
+      <button class="vtab" id="tabScope" onclick="setView('scope',this)" style="display:none">📋 Scope</button>
       <button class="vtab" id="tabSettings" onclick="setView('settings',this)">⚙ Settings</button>
     </div>
     <button class="btn btn-ghost" id="shareBtn" onclick="copyShareUrl(false)" title="Copy shareable link">🔗 Share</button>
@@ -470,6 +471,7 @@ body.drag-active *{cursor:grabbing!important;user-select:none;}
 <!-- Stage 1: Resourcing (Genesis only) -->
 <div id="resourcingView" style="display:none;padding:16px 24px 40px"></div>
 <div id="roadmapView" style="display:none;padding:16px 24px 40px"></div>
+<div id="scopeView" style="display:none;padding:16px 24px 40px"></div>
 
 <!-- ── Cloud Sync Modal ── -->
 <div class="mo" id="moCloud" onclick="bgClose(event,'moCloud')">
@@ -927,7 +929,8 @@ function cloudPayload() {
   return { v: 2, org: ORG, horizon: HORIZON, projects, workOrders: (typeof workOrders !== 'undefined' ? workOrders : []),
            sizingConfig: (typeof sizingConfig !== 'undefined' ? sizingConfig : null),
            resourcing: (typeof resourcing !== 'undefined' ? resourcing : { rows: [] }),
-           roadmap: (typeof roadmap !== 'undefined' ? roadmap : { sections: [], milestones: [] }) };
+           roadmap: (typeof roadmap !== 'undefined' ? roadmap : { sections: [], milestones: [] }),
+           scope: (typeof scope !== 'undefined' ? scope : { segments: [] }) };
 }
 
 /** Debounced push of the full payload to the configured cloud backend. */
@@ -1251,7 +1254,8 @@ function setView(v, el) {
   const setMain     = document.getElementById('settingsView');
   const rsrcMain    = document.getElementById('resourcingView');
   const roadMain    = document.getElementById('roadmapView');
-  [ganttMain, resMain, lvMain, sizingMain, dashMain, setMain, rsrcMain, roadMain].forEach(m => { if (m) m.style.display = 'none'; });
+  const scopeMain   = document.getElementById('scopeView');
+  [ganttMain, resMain, lvMain, sizingMain, dashMain, setMain, rsrcMain, roadMain, scopeMain].forEach(m => { if (m) m.style.display = 'none'; });
   if (v === 'resources') {
     resMain.style.display = 'block'; renderResView();
   } else if (v === 'levelling') {
@@ -1266,6 +1270,8 @@ function setView(v, el) {
     rsrcMain.style.display = 'block'; renderResourcingView();
   } else if (v === 'roadmap') {
     roadMain.style.display = 'block'; renderRoadmap();
+  } else if (v === 'scope') {
+    scopeMain.style.display = 'block'; scRender();
   } else {
     ganttMain.style.display = ''; render();
   }
@@ -2384,6 +2390,10 @@ function applyCloudData(data) {
       if (!Array.isArray(roadmap.milestones)) roadmap.milestones = [];
       localStorage.setItem(KP + 'roadmap', JSON.stringify(roadmap));
     }
+    if (data.scope && Array.isArray(data.scope.segments)) {
+      scope = data.scope;
+      localStorage.setItem(KP + 'scope', JSON.stringify(scope));
+    }
   }
   migrateProjects();
   nextProjId = Math.max(...projects.map(p => p.id), 18) + 1;
@@ -3326,6 +3336,10 @@ let roadmap = JSON.parse(localStorage.getItem(KP + 'roadmap') || 'null') || null
 if (!roadmap || !Array.isArray(roadmap.sections)) roadmap = { sections: [], milestones: [] };
 if (!Array.isArray(roadmap.milestones)) roadmap.milestones = [];
 function persistRoadmap() { localStorage.setItem(KP + 'roadmap', JSON.stringify(roadmap)); pushCloud(); }
+// ── Stage 3: Scope (Genesis) — Release → Segment → Theme totals ──
+let scope = JSON.parse(localStorage.getItem(KP + 'scope') || 'null') || null;
+if (!scope || !Array.isArray(scope.segments)) scope = { segments: [] };
+function persistScope() { localStorage.setItem(KP + 'scope', JSON.stringify(scope)); pushCloud(); }
 let workOrders = JSON.parse(localStorage.getItem(KP + 'wos') || 'null') || (ORG === 'AAR' ? WO_DEFAULTS.map(w => ({ ...w, projects:[...w.projects] })) : []);
 workOrders.forEach(w => { if (!Array.isArray(w.projects)) w.projects = []; if (w.ba == null) w.ba = 0; });
 let nextWoId    = Math.max(0, ...workOrders.map(w => w.id || 0)) + 1;
@@ -4958,15 +4972,95 @@ function rmPrint() {
   w.document.open(); w.document.write(doc); w.document.close();
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  STAGE 3 — Scope (Genesis): Release → Segment → Theme totals, stories, AI %
+// ═══════════════════════════════════════════════════════════════════════════
+let scRel = null, scCollapsed = new Set();
+function scReleases() { const set = new Set(['R2.0', 'R2.1', 'R2.2']); (scope.segments || []).forEach(s => { if (s.release) set.add(s.release); }); return [...set]; }
+function scSegs() { return (scope.segments || []).filter(s => s.release === scRel); }
+function scFindSeg(id) { return scope.segments.find(s => s.id === id); }
+function scThemeAdj(seg, t) { return (+t.md || 0) * (1 - (+seg.ai || 0) / 100); }
+function scSegTotals(seg) { let stories = 0, md = 0, adj = 0, wp = 0, w = 0; (seg.themes || []).forEach(t => { const m = +t.md || 0; stories += (+t.stories || 0); md += m; adj += scThemeAdj(seg, t); wp += m * (+t.pct || 0); w += m; }); return { stories, md, adj, pct: w ? Math.round(wp / w) : 0 }; }
+function scSetRel(r) { scRel = r; scRender(); }
+function scToggleSeg(id) { if (scCollapsed.has(id)) scCollapsed.delete(id); else scCollapsed.add(id); scRender(); }
+function scSetAi(id, val) { const s = scFindSeg(id); if (!s) return; s.ai = Math.max(0, Math.min(100, +val || 0)); persistScope(); scRender(); }
+function scAddSegment() { uiModal('New segment', [{ id: 'name', label: 'Segment name', placeholder: 'e.g. Customer / Sales' }, { id: 'ai', label: 'AI benefit % (applies to its themes)', type: 'number', value: '0' }], 'Add', v => { if (!v.name.trim()) return; scope.segments.push({ id: rmId(), release: scRel, name: v.name.trim(), ai: Math.max(0, Math.min(100, +v.ai || 0)), themes: [] }); persistScope(); scRender(); }); }
+function scEditSegment(id) { const s = scFindSeg(id); if (!s) return; uiModal('Edit segment', [{ id: 'name', label: 'Segment name', value: s.name }, { id: 'ai', label: 'AI benefit %', type: 'number', value: String(+s.ai || 0) }], 'Save', v => { s.name = v.name.trim(); s.ai = Math.max(0, Math.min(100, +v.ai || 0)); persistScope(); scRender(); }); }
+function scDelSegment(id) { uiConfirm('Delete segment', 'Delete this segment and its themes?', () => { scope.segments = scope.segments.filter(s => s.id !== id); persistScope(); scRender(); }); }
+function scAddTheme(segId) { const s = scFindSeg(segId); if (!s) return; uiModal('New theme', [{ id: 'name', label: 'Theme name', placeholder: 'e.g. Offer & Quote Management' }, { id: 'story', label: 'Scope note (optional)' }, { id: 'stories', label: 'User stories (volume)', type: 'number', value: '0' }, { id: 'md', label: 'Baseline man-days', type: 'number', value: '0' }, { id: 'pct', label: '% complete', type: 'number', value: '0' }], 'Add', v => { if (!v.name.trim()) return; s.themes.push({ id: rmId(), name: v.name.trim(), story: (v.story || '').trim(), stories: +v.stories || 0, md: +v.md || 0, pct: Math.max(0, Math.min(100, +v.pct || 0)) }); persistScope(); scRender(); }); }
+function scEditTheme(segId, tid) { const s = scFindSeg(segId); const t = s && s.themes.find(x => x.id === tid); if (!t) return; uiModal('Edit theme', [{ id: 'name', label: 'Theme name', value: t.name }, { id: 'story', label: 'Scope note', value: t.story || '' }, { id: 'stories', label: 'User stories (volume)', type: 'number', value: String(+t.stories || 0) }, { id: 'md', label: 'Baseline man-days', type: 'number', value: String(+t.md || 0) }, { id: 'pct', label: '% complete', type: 'number', value: String(+t.pct || 0) }], 'Save', v => { t.name = v.name.trim(); t.story = (v.story || '').trim(); t.stories = +v.stories || 0; t.md = +v.md || 0; t.pct = Math.max(0, Math.min(100, +v.pct || 0)); persistScope(); scRender(); }); }
+function scDelTheme(segId, tid) { const s = scFindSeg(segId); if (!s) return; s.themes = s.themes.filter(t => t.id !== tid); persistScope(); scRender(); }
+function scAddTesting() { const areas = ['ST', 'SIT', 'BVT', 'Regression', 'UAT', 'PT']; scope.segments.push({ id: rmId(), release: scRel, name: 'Testing', ai: 0, themes: areas.map(a => ({ id: rmId(), name: a, story: '', stories: 0, md: 0, pct: 0 })) }); persistScope(); scRender(); }
+function scRender() {
+  const el = document.getElementById('scopeView'); if (!el) return;
+  const rels = scReleases();
+  if (!scRel || !rels.includes(scRel)) scRel = rels.includes('R2.2') ? 'R2.2' : rels[0];
+  const fmt = n => Math.round(n).toLocaleString();
+  const segs = scSegs();
+  let tStories = 0, tMd = 0, tAdj = 0, twp = 0, tw = 0;
+  segs.forEach(seg => { const st = scSegTotals(seg); tStories += st.stories; tMd += st.md; tAdj += st.adj; twp += st.md * st.pct; tw += st.md; });
+  const tPct = tw ? Math.round(twp / tw) : 0;
+  const relOpts = rels.map(r => `<option value="${r}" ${r === scRel ? 'selected' : ''}>${r}</option>`).join('');
+  const kpi = (l, v, c) => `<div style="background:#fff;border:1px solid #EEF1F6;border-radius:12px;padding:14px 16px;flex:1;min-width:120px"><div style="font-size:10.5px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:.5px">${l}</div><div style="font-size:22px;font-weight:800;color:${c || '#0F2544'};margin-top:5px">${v}</div></div>`;
+  const hdr = `<div style="display:flex;background:#F8FAFC;color:#64748B;font-size:11px;font-weight:700;padding:7px 10px;border-bottom:1px solid #E2E8F0"><div style="flex:2.6">Segment · Theme</div><div style="flex:.8;text-align:right">Stories</div><div style="flex:.9;text-align:right">Baseline</div><div style="flex:.8;text-align:right">AI %</div><div style="flex:.9;text-align:right">AI-adj</div><div style="flex:1.5;text-align:right">% complete</div><div style="width:44px"></div></div>`;
+  let rows = '';
+  segs.forEach(seg => {
+    const st = scSegTotals(seg); const open = !scCollapsed.has(seg.id);
+    rows += `<div style="display:flex;align-items:center;padding:7px 10px;border-bottom:1px solid #E2E8F0;background:#E6F1FB;color:#0C447C;font-weight:700">
+      <div style="flex:2.6;display:flex;align-items:center;gap:6px;min-width:0"><span onclick="scToggleSeg(${seg.id})" style="cursor:pointer;user-select:none">${open ? '▾' : '▸'}</span><span onclick="scEditSegment(${seg.id})" style="cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${seg.name || 'Segment'}</span></div>
+      <div style="flex:.8;text-align:right">${st.stories || '—'}</div>
+      <div style="flex:.9;text-align:right">${fmt(st.md)}</div>
+      <div style="flex:.8;text-align:right;display:flex;justify-content:flex-end;align-items:center;gap:2px"><input type="number" min="0" max="100" value="${+seg.ai || 0}" onchange="scSetAi(${seg.id},this.value)" title="AI benefit % for this segment" style="width:42px;text-align:right;padding:2px 4px;border:1px solid #CBD5E1;border-radius:5px;font-size:11px">%</div>
+      <div style="flex:.9;text-align:right">${fmt(st.adj)}</div>
+      <div style="flex:1.5;text-align:right">${st.pct}%</div>
+      <div style="width:44px;text-align:center"><button onclick="scAddTheme(${seg.id})" title="Add theme" style="border:1px solid #E2E8F0;background:#fff;color:#2563EB;border-radius:5px;cursor:pointer;font-size:11px;line-height:16px;padding:0 5px">+</button><button onclick="scDelSegment(${seg.id})" title="Delete segment" style="border:none;background:none;color:#0C447C;cursor:pointer;font-size:14px;margin-left:2px">×</button></div>
+    </div>`;
+    if (open) {
+      (seg.themes || []).forEach(t => {
+        const adj = scThemeAdj(seg, t); const pct = Math.max(0, Math.min(100, +t.pct || 0));
+        rows += `<div style="display:flex;align-items:center;padding:6px 10px 6px 26px;border-bottom:1px solid #EEF2F7">
+          <div style="flex:2.6;cursor:pointer;min-width:0" onclick="scEditTheme(${seg.id},${t.id})">${t.name || 'Theme'}${t.story ? `<span style="color:#94A3B8;font-weight:400;font-size:10px"> · ${t.story}</span>` : ''}</div>
+          <div style="flex:.8;text-align:right">${+t.stories || 0}</div>
+          <div style="flex:.9;text-align:right">${fmt(+t.md || 0)}</div>
+          <div style="flex:.8;text-align:right;color:#94A3B8">↳${+seg.ai || 0}%</div>
+          <div style="flex:.9;text-align:right">${fmt(adj)}</div>
+          <div style="flex:1.5;display:flex;align-items:center;gap:6px;justify-content:flex-end"><div style="width:70px;height:6px;background:#EEF2F7;border-radius:3px;overflow:hidden"><div style="width:${pct}%;height:100%;background:#1D9E75"></div></div><span style="width:30px;text-align:right;font-size:11px">${pct}%</span></div>
+          <div style="width:44px;text-align:center"><button onclick="scDelTheme(${seg.id},${t.id})" title="Remove theme" style="border:none;background:none;color:#CBD5E1;cursor:pointer;font-size:15px" onmouseover="this.style.color='#DC2626'" onmouseout="this.style.color='#CBD5E1'">×</button></div>
+        </div>`;
+      });
+      rows += `<div style="padding:5px 10px 6px 26px;border-bottom:1px solid #EEF2F7;color:#94A3B8;font-size:11px;cursor:pointer" onclick="scAddTheme(${seg.id})">＋ Add theme</div>`;
+    }
+  });
+  const totalRow = `<div style="display:flex;align-items:center;padding:8px 10px;background:#F8FAFC;font-weight:800;color:#0F2544"><div style="flex:2.6">Release total</div><div style="flex:.8;text-align:right">${tStories}</div><div style="flex:.9;text-align:right">${fmt(tMd)}</div><div style="flex:.8"></div><div style="flex:.9;text-align:right">${fmt(tAdj)}</div><div style="flex:1.5;text-align:right">${tPct}%</div><div style="width:44px"></div></div>`;
+  const empty = !segs.length ? `<div style="text-align:center;color:#94A3B8;padding:36px">No scope for ${scRel} yet. <button onclick="scAddSegment()" style="background:#0F2544;color:#fff;border:none;padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:600;margin-left:6px">+ Add segment</button></div>` : '';
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px">
+      <div style="display:flex;align-items:center;gap:10px"><div style="font-size:20px;font-weight:800;color:#0F2544">Scope — Release</div><select onchange="scSetRel(this.value)" style="padding:6px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:14px;font-weight:600">${relOpts}</select></div>
+      <div style="display:flex;gap:8px"><button class="btn btn-ghost btn-sm" onclick="scAddSegment()" style="font-size:11px">＋ Segment</button><button class="btn btn-ghost btn-sm" onclick="scAddTesting()" style="font-size:11px">＋ Testing areas</button></div>
+    </div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px">
+      ${kpi('Baseline effort', fmt(tMd) + ' MD')}
+      ${kpi('AI-adjusted', fmt(tAdj) + ' MD', '#2563EB')}
+      ${kpi('AI saving', fmt(tMd - tAdj) + ' MD', '#0F766E')}
+      ${kpi('User stories', fmt(tStories))}
+      ${kpi('Complete', tPct + '%')}
+    </div>
+    ${empty}
+    <div style="border:1px solid #E2E8F0;border-radius:12px;overflow:hidden">${hdr}${rows}${segs.length ? totalRow : ''}</div>
+    <div style="font-size:10px;color:#94A3B8;margin-top:10px">Click a segment or theme to edit · AI % is set per segment and adjusts its themes · % complete rolls up weighted by man-days.</div>`;
+}
+
 function applyInternalMode() {
   const d = document.getElementById('tabDashboard');
   const s = document.getElementById('tabSettings');
   const rs = document.getElementById('tabResourcing');
   const rm = document.getElementById('tabRoadmap');
+  const sc = document.getElementById('tabScope');
   if (d) d.style.display = internalMode ? '' : 'none';
   if (s) s.style.display = internalMode ? '' : 'none';
   if (rs) rs.style.display = (internalMode && isGenesis()) ? '' : 'none';   // Genesis-only
   if (rm) rm.style.display = (internalMode && isGenesis()) ? '' : 'none';   // Genesis-only
+  if (sc) sc.style.display = (internalMode && isGenesis()) ? '' : 'none';   // Genesis-only
   const btn = document.getElementById('internalToggle');
   if (btn) {
     btn.textContent  = internalMode ? '🔓 Internal' : '🔒';
@@ -4977,7 +5071,7 @@ function applyInternalMode() {
       : 'Internal views hidden (customer-safe) — click to show Dashboard & Settings';
   }
   // If hiding while currently on a now-hidden view, fall back to the timeline
-  if ((!internalMode && (viewMode === 'dashboard' || viewMode === 'settings')) || ((viewMode === 'resourcing' || viewMode === 'roadmap') && !(internalMode && isGenesis()))) {
+  if ((!internalMode && (viewMode === 'dashboard' || viewMode === 'settings')) || ((viewMode === 'resourcing' || viewMode === 'roadmap' || viewMode === 'scope') && !(internalMode && isGenesis()))) {
     const t = [...document.querySelectorAll('.vtab')].find(x => x.textContent.includes('By Stream'));
     setView('stream', t);
   }

@@ -3345,6 +3345,7 @@ function persistRoadmap() { localStorage.setItem(KP + 'roadmap', JSON.stringify(
 let scope = JSON.parse(localStorage.getItem(KP + 'scope') || 'null') || null;
 if (!scope || !Array.isArray(scope.segments)) scope = { segments: [] };
 if (!scope.domainMap || typeof scope.domainMap !== 'object') scope.domainMap = {};
+if (!scope.resourcePlan || typeof scope.resourcePlan !== 'object') scope.resourcePlan = {};
 function persistScope() { localStorage.setItem(KP + 'scope', JSON.stringify(scope)); pushCloud(); }
 let workOrders = JSON.parse(localStorage.getItem(KP + 'wos') || 'null') || (ORG === 'AAR' ? WO_DEFAULTS.map(w => ({ ...w, projects:[...w.projects] })) : []);
 workOrders.forEach(w => { if (!Array.isArray(w.projects)) w.projects = []; if (w.ba == null) w.ba = 0; });
@@ -5165,6 +5166,34 @@ function scAddTheme(segId) { const s = scFindSeg(segId); if (!s) return; uiModal
 function scEditTheme(segId, tid) { const s = scFindSeg(segId); const t = s && s.themes.find(x => x.id === tid); if (!t) return; uiModal('Edit theme', [{ id: 'name', label: 'Theme name', value: t.name }, { id: 'story', label: 'Scope note', value: t.story || '' }, { id: 'stories', label: 'User stories (volume)', type: 'number', value: String(+t.stories || 0) }, { id: 'md', label: 'Baseline man-days', type: 'number', value: String(+t.md || 0) }, { id: 'pct', label: '% complete', type: 'number', value: String(+t.pct || 0) }], 'Save', v => { t.name = v.name.trim(); t.story = (v.story || '').trim(); t.stories = +v.stories || 0; t.md = +v.md || 0; t.pct = Math.max(0, Math.min(100, +v.pct || 0)); persistScope(); scRender(); }); }
 function scDelTheme(segId, tid) { const s = scFindSeg(segId); if (!s) return; s.themes = s.themes.filter(t => t.id !== tid); persistScope(); scRender(); }
 function scAddTesting() { const areas = ['ST', 'SIT', 'BVT', 'Regression', 'UAT', 'PT']; scope.segments.push({ id: rmId(), release: scRel, name: 'Testing', ai: 0, themes: areas.map(a => ({ id: rmId(), name: a, story: '', stories: 0, md: 0, pct: 0 })) }); persistScope(); scRender(); }
+/** Import a sizing workbook's "Theme Summary" sheet (Domain, Theme, E2E, Build, Total) into the current release. */
+function scImportSizing() {
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.xlsx,.xls';
+  inp.onchange = e => { const file = e.target.files[0]; if (!file) return; ensureXlsx(() => {
+    const rd = new FileReader();
+    rd.onload = ev => { try {
+      const wb = XLSX.read(ev.target.result, { type: 'array' });
+      const name = wb.SheetNames.find(n => /theme\s*summary/i.test(n)) || wb.SheetNames[0];
+      const arr = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true });
+      const hdr = (arr[0] || []).map(x => String(x == null ? '' : x).toLowerCase());
+      const find = kw => hdr.findIndex(h => h.includes(kw));
+      const iDom = find('domain'), iThe = find('theme'), iTot = find('total'), iE2E = find('e2e'), iBld = find('build');
+      if (iDom < 0 || iThe < 0) { alert('Could not find Domain / Theme columns. Expected a "Theme Summary" style sheet.'); return; }
+      const bySeg = {};
+      for (let r = 1; r < arr.length; r++) { const row = arr[r]; if (!row) continue; const dom = String(row[iDom] == null ? '' : row[iDom]).trim(); const th = String(row[iThe] == null ? '' : row[iThe]).trim(); if (!dom || !th) continue; const e2e = +row[iE2E] || 0, bld = +row[iBld] || 0; const tot = (iTot >= 0 ? +row[iTot] : 0) || (e2e + bld); (bySeg[dom] = bySeg[dom] || []).push({ name: th, md: tot, e2e, build: bld }); }
+      let nTh = 0;
+      Object.keys(bySeg).forEach(dom => {
+        let seg = scope.segments.find(s => s.release === scRel && (s.name || '').toLowerCase() === dom.toLowerCase());
+        if (!seg) { seg = { id: rmId(), release: scRel, name: dom, ai: 0, themes: [] }; scope.segments.push(seg); }
+        bySeg[dom].forEach(t => { let ex = seg.themes.find(x => (x.name || '').toLowerCase() === t.name.toLowerCase()); if (ex) { ex.md = t.md; ex.e2e = t.e2e; ex.build = t.build; } else { seg.themes.push({ id: rmId(), name: t.name, story: '', stories: 0, md: t.md, e2e: t.e2e, build: t.build, pct: 0 }); } nTh++; });
+      });
+      persistScope(); scRender();
+      alert('Imported ' + nTh + ' themes across ' + Object.keys(bySeg).length + ' segments into ' + scRel + '.');
+    } catch (err) { alert('Import failed: ' + err.message); } };
+    rd.readAsArrayBuffer(file);
+  }); };
+  inp.click();
+}
 function scMapAdd(encName, domain) { if (!domain) return; const nm = decodeURIComponent(encName); scope.domainMap = scope.domainMap || {}; scope.domainMap[nm] = scope.domainMap[nm] || []; if (!scope.domainMap[nm].includes(domain)) scope.domainMap[nm].push(domain); persistScope(); scRender(); }
 function scMapRemove(encName, encDom) { const nm = decodeURIComponent(encName), dom = decodeURIComponent(encDom); scope.domainMap = scope.domainMap || {}; scope.domainMap[nm] = (scope.domainMap[nm] || []).filter(d => d !== dom); persistScope(); scRender(); }
 function scDomsMD(doms) { const set = new Set((doms || []).map(d => d.toLowerCase())); const mk = resMonths(); let fc = 0, ac = 0; (resourcing.rows || []).forEach(r => { if (!set.has(String(r.domain || '').trim().toLowerCase())) return; mk.forEach(mo => { if (resFcInMonth(r, mo.key)) fc += +((r.forecast || {})[mo.key] || 0); if (resAcInMonth(r, mo.key)) ac += +((r.actual || {})[mo.key] || 0); }); }); return { fc, ac }; }
@@ -5194,8 +5223,7 @@ function scRender() {
   const fmt = n => Math.round(n).toLocaleString();
   const segs = scSegs();
   let tStories = 0, tMd = 0, tAdj = 0, wpMd = 0, wMd = 0, wpSt = 0, wSt = 0, sumP = 0, nSeg = 0;
-  const scSegBase = seg => scDomsMD((scope.domainMap || {})[seg.name] || []).fc;   // baseline man-days from mapped resource domains
-  segs.forEach(seg => { const st = scSegTotals(seg); const segBase = scSegBase(seg); const segAdj = segBase * (1 - (+seg.ai || 0) / 100); tStories += st.stories; tMd += segBase; tAdj += segAdj; wpMd += segBase * st.pct; wMd += segBase; wpSt += st.stories * st.pct; wSt += st.stories; sumP += st.pct; nSeg++; });
+  segs.forEach(seg => { const st = scSegTotals(seg); tStories += st.stories; tMd += st.md; tAdj += st.adj; wpMd += st.md * st.pct; wMd += st.md; wpSt += st.stories * st.pct; wSt += st.stories; sumP += st.pct; nSeg++; });
   const tPct = wMd > 0 ? Math.round(wpMd / wMd) : wSt > 0 ? Math.round(wpSt / wSt) : nSeg ? Math.round(sumP / nSeg) : 0;
   const relOpts = rels.map(r => `<option value="${r}" ${r === scRel ? 'selected' : ''}>${r}</option>`).join('');
   const kpi = (l, v, c) => `<div style="background:#fff;border:1px solid #EEF1F6;border-radius:12px;padding:14px 16px;flex:1;min-width:120px"><div style="font-size:10.5px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:.5px">${l}</div><div style="font-size:22px;font-weight:800;color:${c || '#0F2544'};margin-top:5px">${v}</div></div>`;
@@ -5203,14 +5231,12 @@ function scRender() {
   let rows = '';
   segs.forEach(seg => {
     const st = scSegTotals(seg); const open = !scCollapsed.has(seg.id);
-    const segBase = scSegBase(seg); const segAdj = segBase * (1 - (+seg.ai || 0) / 100);
-    const mapped = (scope.domainMap || {})[seg.name] || [];
     rows += `<div style="display:flex;align-items:center;padding:7px 10px;border-bottom:1px solid #E2E8F0;background:#E6F1FB;color:#0C447C;font-weight:700">
-      <div style="flex:2.6;display:flex;align-items:center;gap:6px;min-width:0"><span onclick="scToggleSeg(${seg.id})" style="cursor:pointer;user-select:none">${open ? '▾' : '▸'}</span><span onclick="scEditSegment(${seg.id})" style="cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${seg.name || 'Segment'}</span>${mapped.length ? '' : '<span title="No resource domain mapped — Baseline is 0. Map domains below." style="color:#B45309;font-weight:400;font-size:10px">· unmapped</span>'}</div>
+      <div style="flex:2.6;display:flex;align-items:center;gap:6px;min-width:0"><span onclick="scToggleSeg(${seg.id})" style="cursor:pointer;user-select:none">${open ? '▾' : '▸'}</span><span onclick="scEditSegment(${seg.id})" style="cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${seg.name || 'Segment'}</span></div>
       <div style="flex:.8;text-align:right">${st.stories || '—'}</div>
-      <div style="flex:.9;text-align:right" title="From mapped resource domains: ${mapped.join(', ') || 'none'}">${fmt(segBase)}</div>
+      <div style="flex:.9;text-align:right">${fmt(st.md)}</div>
       <div style="flex:.8;text-align:right;display:flex;justify-content:flex-end;align-items:center;gap:2px"><input type="number" min="0" max="100" value="${+seg.ai || 0}" onchange="scSetAi(${seg.id},this.value)" title="AI benefit % for this segment" style="width:42px;text-align:right;padding:2px 4px;border:1px solid #CBD5E1;border-radius:5px;font-size:11px">%</div>
-      <div style="flex:.9;text-align:right">${fmt(segAdj)}</div>
+      <div style="flex:.9;text-align:right">${fmt(st.adj)}</div>
       <div style="flex:1.5;text-align:right">${st.pct}%</div>
       <div style="width:44px;text-align:center"><button onclick="scAddTheme(${seg.id})" title="Add theme" style="border:1px solid #E2E8F0;background:#fff;color:#2563EB;border-radius:5px;cursor:pointer;font-size:11px;line-height:16px;padding:0 5px">+</button><button onclick="scDelSegment(${seg.id})" title="Delete segment" style="border:none;background:none;color:#0C447C;cursor:pointer;font-size:14px;margin-left:2px">×</button></div>
     </div>`;
@@ -5247,7 +5273,7 @@ function scRender() {
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px">
       <div style="display:flex;align-items:center;gap:10px"><div style="font-size:20px;font-weight:800;color:#0F2544">Scope — Release</div><select onchange="scSetRel(this.value)" style="padding:6px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:14px;font-weight:600">${relOpts}</select></div>
-      <div style="display:flex;gap:8px"><button class="btn btn-ghost btn-sm" onclick="scAddSegment()" style="font-size:11px">＋ Segment</button><button class="btn btn-ghost btn-sm" onclick="scAddTesting()" style="font-size:11px">＋ Testing areas</button><button class="btn btn-ghost btn-sm" onclick="scCopyOpen()" style="font-size:11px">⧉ Copy to release</button></div>
+      <div style="display:flex;gap:8px"><button class="btn btn-ghost btn-sm" onclick="scAddSegment()" style="font-size:11px">＋ Segment</button><button class="btn btn-ghost btn-sm" onclick="scAddTesting()" style="font-size:11px">＋ Testing areas</button><button class="btn btn-ghost btn-sm" onclick="scImportSizing()" style="font-size:11px">⬆ Import sizing</button><button class="btn btn-ghost btn-sm" onclick="scCopyOpen()" style="font-size:11px">⧉ Copy to release</button></div>
     </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px">
       ${kpi('Baseline effort', fmt(tMd) + ' MD')}

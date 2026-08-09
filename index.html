@@ -5049,6 +5049,25 @@ function scAddTheme(segId) { const s = scFindSeg(segId); if (!s) return; uiModal
 function scEditTheme(segId, tid) { const s = scFindSeg(segId); const t = s && s.themes.find(x => x.id === tid); if (!t) return; uiModal('Edit theme', [{ id: 'name', label: 'Theme name', value: t.name }, { id: 'story', label: 'Scope note', value: t.story || '' }, { id: 'stories', label: 'User stories (volume)', type: 'number', value: String(+t.stories || 0) }, { id: 'md', label: 'Baseline man-days', type: 'number', value: String(+t.md || 0) }, { id: 'pct', label: '% complete', type: 'number', value: String(+t.pct || 0) }], 'Save', v => { t.name = v.name.trim(); t.story = (v.story || '').trim(); t.stories = +v.stories || 0; t.md = +v.md || 0; t.pct = Math.max(0, Math.min(100, +v.pct || 0)); persistScope(); scRender(); }); }
 function scDelTheme(segId, tid) { const s = scFindSeg(segId); if (!s) return; s.themes = s.themes.filter(t => t.id !== tid); persistScope(); scRender(); }
 function scAddTesting() { const areas = ['ST', 'SIT', 'BVT', 'Regression', 'UAT', 'PT']; scope.segments.push({ id: rmId(), release: scRel, name: 'Testing', ai: 0, themes: areas.map(a => ({ id: rmId(), name: a, story: '', stories: 0, md: 0, pct: 0 })) }); persistScope(); scRender(); }
+function scCopyOpen() {
+  if (!scSegs().length) { alert('Nothing to copy in ' + scRel + '.'); return; }
+  const rels = scReleases().filter(r => r !== scRel);
+  uiModal('Copy scope to another release', [
+    { id: 'target', label: 'Copy ' + scRel + '’s segments & themes to', type: 'select', value: rels[0] || '', options: rels.map(r => [r, r]) },
+    { id: 'resetpct', label: '% complete for the copy', type: 'select', value: 'yes', options: [['yes', 'Reset to 0% (fresh release)'], ['no', 'Keep the current %']] }
+  ], 'Copy', v => {
+    const target = v.target; if (!target) return;
+    const reset = v.resetpct === 'yes';
+    const doCopy = () => {
+      scope.segments.filter(s => s.release === scRel).forEach(seg => {
+        scope.segments.push({ id: rmId(), release: target, name: seg.name, ai: +seg.ai || 0, themes: (seg.themes || []).map(t => ({ id: rmId(), name: t.name, story: t.story || '', stories: +t.stories || 0, md: +t.md || 0, pct: reset ? 0 : (+t.pct || 0) })) });
+      });
+      persistScope(); scRel = target; scRender();
+    };
+    if (scope.segments.some(s => s.release === target)) uiConfirm('Target not empty', target + ' already has scope — add these segments on top?', doCopy, 'Add');
+    else doCopy();
+  });
+}
 function scRender() {
   const el = document.getElementById('scopeView'); if (!el) return;
   const rels = scReleases();
@@ -5094,7 +5113,7 @@ function scRender() {
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px">
       <div style="display:flex;align-items:center;gap:10px"><div style="font-size:20px;font-weight:800;color:#0F2544">Scope — Release</div><select onchange="scSetRel(this.value)" style="padding:6px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:14px;font-weight:600">${relOpts}</select></div>
-      <div style="display:flex;gap:8px"><button class="btn btn-ghost btn-sm" onclick="scAddSegment()" style="font-size:11px">＋ Segment</button><button class="btn btn-ghost btn-sm" onclick="scAddTesting()" style="font-size:11px">＋ Testing areas</button></div>
+      <div style="display:flex;gap:8px"><button class="btn btn-ghost btn-sm" onclick="scAddSegment()" style="font-size:11px">＋ Segment</button><button class="btn btn-ghost btn-sm" onclick="scAddTesting()" style="font-size:11px">＋ Testing areas</button><button class="btn btn-ghost btn-sm" onclick="scCopyOpen()" style="font-size:11px">⧉ Copy to release</button></div>
     </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px">
       ${kpi('Baseline effort', fmt(tMd) + ' MD')}

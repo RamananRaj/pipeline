@@ -4346,6 +4346,7 @@ function renderResourcingView() {
         <button class="btn btn-ghost btn-sm" onclick="resImport('forecast')" style="font-size:11px">⬆ Import forecast</button>
         <button class="btn btn-ghost btn-sm" onclick="resImport('actual')" style="font-size:11px">⬆ Import actuals</button>
         <button class="btn btn-ghost btn-sm" onclick="resOpenDetail(-1)" style="font-size:11px">＋ Add resource</button>
+        <button class="btn btn-ghost btn-sm" onclick="resToggleGrid()" style="font-size:11px">${resGrid ? '▤ List view' : '▦ Weekly grid'}</button>
         ${rows.length ? `<button class="btn btn-ghost btn-sm" onclick="resClear()" style="font-size:11px;color:#DC2626">Clear</button>` : ''}
       </div>
     </div>
@@ -4361,8 +4362,45 @@ function renderResourcingView() {
       <span class="res-hint">grey = forecast · blue = actual (timesheet upload)</span></div>${bars}</div>
     <div class="res-card" style="border-radius:14px"><div class="res-card-title">By domain — elapsed period</div>
       <table class="dtable"><thead><tr><th>Domain</th><th style="text-align:right">Forecast</th><th style="text-align:right">Actual</th><th style="text-align:right">Variance</th><th style="text-align:right">OT</th><th style="text-align:right">Full FC</th></tr></thead><tbody>${domRows}</tbody></table></div>
-    <div class="res-card" style="border-radius:14px"><div class="res-card-title">Resources <span class="res-hint">click a name to edit · <span style="color:#2563EB">▸ Weekly</span> to enter forecast hours by week</span>${resSelected.size ? `<span style="float:right;display:inline-flex;align-items:center;gap:8px;font-size:12px"><span style="color:#0F2544;font-weight:700">${resSelected.size} selected</span><button onclick="resOpenBulk()" style="background:#0F2544;color:#fff;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-weight:600;font-size:11px">Bulk update</button><button onclick="resClearSel()" style="background:#F1F5F9;color:#475569;border:none;padding:5px 10px;border-radius:8px;cursor:pointer;font-size:11px">Clear</button></span>` : ''}</div>
-      <table class="dtable"><thead><tr><th style="text-align:center"><input type="checkbox" onclick="resSelectAll(this.checked)" ${rows.length && rows.every(r => resSelected.has(r.id)) ? 'checked' : ''} title="Select all" style="cursor:pointer"></th>${sTh('Name', 'name')}${sTh('Role', 'role')}${sTh('Domain', 'domain')}${sTh('Release', 'release')}${sTh('FC md', 'fc', 'right')}${sTh('Act md', 'act', 'right')}${sTh('ETC', 'etc', 'right')}${sTh('OT', 'ot', 'right')}${sTh('Status', 'status', 'center')}<th></th></tr></thead><tbody>${resList}</tbody></table></div>`;
+    ${resGrid ? resGridHTML() : `<div class="res-card" style="border-radius:14px"><div class="res-card-title">Resources <span class="res-hint">click a name to edit · <span style="color:#2563EB">▸ Weekly</span> to enter forecast hours by week</span>${resSelected.size ? `<span style="float:right;display:inline-flex;align-items:center;gap:8px;font-size:12px"><span style="color:#0F2544;font-weight:700">${resSelected.size} selected</span><button onclick="resOpenBulk()" style="background:#0F2544;color:#fff;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-weight:600;font-size:11px">Bulk update</button><button onclick="resClearSel()" style="background:#F1F5F9;color:#475569;border:none;padding:5px 10px;border-radius:8px;cursor:pointer;font-size:11px">Clear</button></span>` : ''}</div>
+      <table class="dtable"><thead><tr><th style="text-align:center"><input type="checkbox" onclick="resSelectAll(this.checked)" ${rows.length && rows.every(r => resSelected.has(r.id)) ? 'checked' : ''} title="Select all" style="cursor:pointer"></th>${sTh('Name', 'name')}${sTh('Role', 'role')}${sTh('Domain', 'domain')}${sTh('Release', 'release')}${sTh('FC md', 'fc', 'right')}${sTh('Act md', 'act', 'right')}${sTh('ETC', 'etc', 'right')}${sTh('OT', 'ot', 'right')}${sTh('Status', 'status', 'center')}<th></th></tr></thead><tbody>${resList}</tbody></table></div>`}`;
+}
+// ── Weekly grid: resources × weeks, forecast editable + actual row, frozen headers ──
+let resGrid = false;
+function resToggleGrid() { resGrid = !resGrid; renderResourcingView(); }
+let _resGridTimer = null;
+function resGridSet(id, wk, val) {
+  const r = (resourcing.rows || []).find(x => x.id === id); if (!r) return;
+  r.forecastWk = r.forecastWk || {};
+  const t = String(val).trim();
+  if (t === '') delete r.forecastWk[wk]; else { const n = parseFloat(t); if (!isNaN(n)) r.forecastWk[wk] = n; }
+  const w = resWeeks().find(x => x.key === wk); if (w) resRecalcMonthFromWeeks(r, w.monthKey);
+  clearTimeout(_resGridTimer); _resGridTimer = setTimeout(() => { localStorage.setItem(KP + 'resourcing', JSON.stringify(resourcing)); pushCloud(); }, 600);
+}
+function resGridHTML() {
+  const rows = resourcing.rows || [];
+  if (!rows.length) return `<div class="res-card" style="border-radius:14px"><div style="text-align:center;color:#94A3B8;padding:24px">No resources yet.</div></div>`;
+  const WK = resWeeks();
+  const byMo = {}; WK.forEach(w => { (byMo[w.monthKey] = byMo[w.monthKey] || []).push(w); });
+  const months = Object.keys(byMo);
+  const monLabel = k => { const g = GMONTHS.find(x => (x.y + '-' + String(x.m + 1).padStart(2, '0')) === k); return g ? g.label : k; };
+  const NAMEW = 190, CELLW = 46;
+  const monthHead = months.map(k => `<th colspan="${byMo[k].length}" style="position:sticky;top:0;z-index:5;background:#0F2544;color:#fff;font-size:10px;font-weight:700;padding:4px 0;border-right:1px solid #22375a;text-align:center">${monLabel(k)}</th>`).join('');
+  const weekHead = WK.map(w => `<th style="position:sticky;top:22px;z-index:4;background:#13315c;color:#cbd5e1;font-size:8.5px;font-weight:600;padding:3px 0;min-width:${CELLW}px;border-right:1px solid #22375a;text-align:center">${w.label}</th>`).join('');
+  const body = rows.slice(0, 300).map((r, i) => {
+    const off = r.active === false;
+    const fcells = WK.map(w => { const v = (r.forecastWk || {})[w.key]; return `<td style="padding:0;border-right:1px solid #F1F5F9"><input type="number" min="0" step="0.5" value="${v != null ? v : ''}" onchange="resGridSet(${r.id},'${w.key}',this.value)" title="Forecast hours" style="width:${CELLW}px;height:22px;border:none;text-align:center;font-size:11px;background:transparent;color:#0F2544"></td>`; }).join('');
+    const acells = WK.map(w => { const a = (r.actualWk || {})[w.key]; const over = a != null && a > 37.5; return `<td style="padding:0;border-right:1px solid #F1F5F9;text-align:center;font-size:9.5px;font-weight:700;color:${a == null ? '#CBD5E1' : over ? '#B45309' : '#0F766E'};background:#FAFBFC">${a != null ? a : '·'}</td>`; }).join('');
+    const nameCell = `<td rowspan="2" style="position:sticky;left:0;z-index:3;background:${off ? '#F1F5F9' : '#F8FAFC'};border-right:1px solid #E2E8F0;padding:2px 8px;min-width:${NAMEW}px;max-width:${NAMEW}px;${off ? 'opacity:.55' : ''}"><div onclick="resOpenDetail(${i})" title="Open resource details" style="cursor:pointer;font-size:11px;font-weight:500;color:#0F2544;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.name || '—'}</div><div style="font-size:9px;color:#94A3B8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${[r.role, r.domain].filter(Boolean).join(' · ')}</div></td>`;
+    return `<tr>${nameCell}<td style="position:sticky;left:${NAMEW}px;z-index:3;background:#EFF6FF;color:#2563EB;font-size:8px;font-weight:800;padding:0 4px;border-right:1px solid #E2E8F0">F</td>${fcells}</tr><tr><td style="position:sticky;left:${NAMEW}px;z-index:3;background:#F0FDF4;color:#0F766E;font-size:8px;font-weight:800;padding:0 4px;border-right:1px solid #E2E8F0">A</td>${acells}</tr>`;
+  }).join('');
+  return `<div class="res-card" style="border-radius:14px;padding:12px"><div class="res-card-title">Weekly grid <span class="res-hint">scroll → across weeks · <span style="color:#2563EB">F</span> = forecast hours (editable) · <span style="color:#0F766E">A</span> = actual · click a name for details</span></div>
+    <div style="overflow:auto;max-height:70vh;border:1px solid #E2E8F0;border-radius:8px">
+      <table style="border-collapse:collapse"><thead>
+        <tr><th rowspan="2" style="position:sticky;top:0;left:0;z-index:7;background:#0F2544;color:#cbd5e1;font-size:10px;padding:0 8px;min-width:${NAMEW}px;text-align:left">Resource</th><th rowspan="2" style="position:sticky;top:0;left:${NAMEW}px;z-index:7;background:#0F2544;border-right:1px solid #22375a"></th>${monthHead}</tr>
+        <tr>${weekHead}</tr>
+      </thead><tbody>${body}</tbody></table>
+    </div></div>`;
 }
 function resToggleActive(i) {
   const r = resourcing.rows[i]; if (!r) return;

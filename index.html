@@ -3682,6 +3682,23 @@ function genValidationHTML() {
     </div>
     <div style="font-size:10px;color:#94A3B8;margin-top:8px">Timeline lanes are matched to resource domains by the lane's Domain (set it in the sub-lane editor), or by an exact lane-name match.</div>`;
 }
+/** Genesis Dashboard — Governance summary (CRs + Risks/Issues). */
+function genGovSummary() {
+  if (!isGenesis()) return '';
+  const crs = governance.crs || [], risks = governance.risks || [];
+  const openCRs = crs.filter(c => !['Rejected', 'Implemented'].includes(c.status));
+  const crEff = openCRs.reduce((s, c) => s + govCrMd(c), 0);
+  const openR = risks.filter(r => r.status !== 'Closed');
+  const red = openR.filter(r => govRag(r.prob, r.impact) === 'Red');
+  const fmt = n => Math.round(n).toLocaleString();
+  const kpi = (l, v, c) => `<div style="background:#fff;border:1px solid #EEF1F6;border-radius:14px;padding:16px 18px;flex:1;min-width:150px;box-shadow:0 1px 2px rgba(15,37,68,.04)"><div style="font-size:10.5px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:.6px">${l}</div><div style="font-size:26px;font-weight:800;color:${c || '#0F2544'};margin-top:6px">${v}</div></div>`;
+  const rank = { Red: 0, Amber: 1, Green: 2 };
+  const top = openR.map(r => ({ r, rag: govRag(r.prob, r.impact) })).sort((a, b) => rank[a.rag] - rank[b.rag]).slice(0, 6);
+  const list = top.length ? `<div class="res-card" style="border-radius:12px"><div class="res-card-title">Top open risks / issues</div>${top.map(x => `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:4px 0;border-bottom:1px solid #F1F5F9"><span><span style="color:${GOV_RAGC[x.rag]};font-weight:800">●</span> <strong>${x.r.ref || ''}</strong> ${x.r.title || ''}${x.r.impacted ? ` <span style="color:#94A3B8">· ${x.r.impacted}</span>` : ''}</span><span style="color:#64748B;white-space:nowrap">${x.r.type} · ${x.r.status}</span></div>`).join('')}</div>` : '';
+  if (!crs.length && !risks.length) return '';
+  return `<div style="font-size:16px;font-weight:800;color:#0F2544;margin:26px 0 10px">Governance</div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">${kpi('Open CRs', openCRs.length)}${kpi('CR effort', fmt(crEff) + ' MD', '#0F766E')}${kpi('Open risks / issues', openR.length)}${kpi('Red risks', red.length, red.length ? '#DC2626' : '#16A34A')}</div>${list}`;
+}
 /** Genesis Dashboard — Resourcing Forecast vs Actual summary + by-Domain pool (no AAR utilisation). */
 function genDashboardHTML() {
   const T = resTotals(); const fmt = n => Math.round(n).toLocaleString();
@@ -3706,7 +3723,8 @@ function genDashboardHTML() {
     </div>
     <div class="res-card" style="border-radius:14px"><div class="res-card-title" onclick="genChkToggle('chart')" style="cursor:pointer" title="Minimise / maximise"><span style="color:#94A3B8;margin-right:4px">${genChkCollapsed.has('chart') ? '▸' : '▾'}</span>Forecast vs Actual by month <span class="res-hint">grey = forecast · blue = actual (timesheet upload)</span></div>${genChkCollapsed.has('chart') ? '' : bars}</div>
     ${genDomainPoolPanel()}
-    ${genValidationHTML()}`;
+    ${genValidationHTML()}
+    ${genGovSummary()}`;
 }
 function renderDashboardView() {
   if (isGenesis()) { document.getElementById('dashboardView').innerHTML = genDashboardHTML(); return; }

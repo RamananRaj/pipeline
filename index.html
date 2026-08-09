@@ -2394,6 +2394,7 @@ function applyCloudData(data) {
     }
     if (data.resourcing && Array.isArray(data.resourcing.rows)) {
       resourcing = data.resourcing;
+      if (!Array.isArray(resourcing.support)) resourcing.support = [];
       localStorage.setItem(KP + 'resourcing', JSON.stringify(resourcing));
     }
     if (data.roadmap && Array.isArray(data.roadmap.sections)) {
@@ -3348,7 +3349,28 @@ const WO_DEFAULTS = [
 ];
 let resourcing = JSON.parse(localStorage.getItem(KP + 'resourcing') || 'null') || { rows: [] };
 if (!resourcing || !Array.isArray(resourcing.rows)) resourcing = { rows: [] };
+if (!Array.isArray(resourcing.support)) resourcing.support = [];
 function persistResourcing() { localStorage.setItem(KP + 'resourcing', JSON.stringify(resourcing)); pushCloud(); }
+function supOpen(id) {
+  const s = id ? (resourcing.support || []).find(x => x.id === id) : null;
+  uiModal(id ? 'Edit support resource' : 'Add support resource', [
+    { id: 'name', label: 'Name', value: (s && s.name) || '' },
+    { id: 'role', label: 'Role', value: (s && s.role) || '', placeholder: 'e.g. Support Engineer' },
+    { id: 'fte', label: 'FTE', type: 'number', value: String((s && s.fte) != null ? s.fte : 1) }
+  ], 'Save', v => {
+    if (!v.name.trim()) return; resourcing.support = resourcing.support || [];
+    if (s) { s.name = v.name.trim(); s.role = v.role.trim(); s.fte = +v.fte || 0; }
+    else resourcing.support.push({ id: rmId(), name: v.name.trim(), role: v.role.trim(), fte: +v.fte || 0 });
+    persistResourcing(); renderResourcingView();
+  });
+}
+function supDel(id) { resourcing.support = (resourcing.support || []).filter(x => x.id !== id); persistResourcing(); renderResourcingView(); }
+function supSeed() {
+  const seed = [['Antony Jones', 1], ['Jansi Rani', 1], ['Jonathan Chen', 1], ['Liza Catapang', 0.5], ['Priyanka Antil', 0.75], ['Rohit Kadam', 1], ['Tanvi Kulkarni', 1]];
+  resourcing.support = resourcing.support || [];
+  seed.forEach(([n, f]) => { if (!resourcing.support.some(x => (x.name || '').toLowerCase() === n.toLowerCase())) resourcing.support.push({ id: rmId(), name: n, role: 'Support', fte: f }); });
+  persistResourcing(); renderResourcingView();
+}
 // ── Stage 2: Roadmap (Genesis) — nested swimlanes + milestones ──
 let roadmap = JSON.parse(localStorage.getItem(KP + 'roadmap') || 'null') || null;
 if (!roadmap || !Array.isArray(roadmap.sections)) roadmap = { sections: [], milestones: [] };
@@ -3699,6 +3721,17 @@ function genGovSummary() {
   return `<div style="font-size:16px;font-weight:800;color:#0F2544;margin:26px 0 10px">Governance</div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">${kpi('Open CRs', openCRs.length)}${kpi('CR effort', fmt(crEff) + ' MD', '#0F766E')}${kpi('Open risks / issues', openR.length)}${kpi('Red risks', red.length, red.length ? '#DC2626' : '#16A34A')}</div>${list}`;
 }
+function genSupportSummary() {
+  if (!isGenesis()) return '';
+  const sup = resourcing.support || [];
+  if (!sup.length) return '';
+  const fte = sup.reduce((s, x) => s + (+x.fte || 0), 0);
+  const kpi = (l, v, c) => `<div style="background:#fff;border:1px solid #EEF1F6;border-radius:14px;padding:16px 18px;flex:1;min-width:150px;box-shadow:0 1px 2px rgba(15,37,68,.04)"><div style="font-size:10.5px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:.6px">${l}</div><div style="font-size:26px;font-weight:800;color:${c || '#0F2544'};margin-top:6px">${v}</div></div>`;
+  const rowsH = sup.map(x => `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:4px 0;border-bottom:1px solid #F1F5F9"><span><strong>${x.name}</strong>${x.role ? ` <span style="color:#94A3B8">· ${x.role}</span>` : ''}</span><span style="color:#64748B;white-space:nowrap">${x.fte} FTE</span></div>`).join('');
+  return `<div style="font-size:16px;font-weight:800;color:#0F2544;margin:26px 0 10px">Support <span style="font-size:12px;font-weight:500;color:#94A3B8">— reference only, separate from the delivery forecast</span></div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">${kpi('Support headcount', sup.length)}${kpi('Support capacity', fte + ' FTE', '#0F766E')}</div>
+    <div class="res-card" style="border-radius:12px;background:#FFFBEB"><div class="res-card-title">Support team</div>${rowsH}</div>`;
+}
 /** Genesis Dashboard — Resourcing Forecast vs Actual summary + by-Domain pool (no AAR utilisation). */
 function genDashboardHTML() {
   const T = resTotals(); const fmt = n => Math.round(n).toLocaleString();
@@ -3724,6 +3757,7 @@ function genDashboardHTML() {
     <div class="res-card" style="border-radius:14px"><div class="res-card-title" onclick="genChkToggle('chart')" style="cursor:pointer" title="Minimise / maximise"><span style="color:#94A3B8;margin-right:4px">${genChkCollapsed.has('chart') ? '▸' : '▾'}</span>Forecast vs Actual by month <span class="res-hint">grey = forecast · blue = actual (timesheet upload)</span></div>${genChkCollapsed.has('chart') ? '' : bars}</div>
     ${genDomainPoolPanel()}
     ${genValidationHTML()}
+    ${genSupportSummary()}
     ${genGovSummary()}`;
 }
 function renderDashboardView() {
@@ -4461,6 +4495,21 @@ function renderResourcingView() {
   const resTotalRow = shown.length ? `<tr style="border-top:2px solid #E2E8F0;font-weight:800;background:#F8FAFC"><td></td><td>Total${resSearch ? ' (' + shown.length + ')' : ''}</td><td></td><td></td><td></td><td style="text-align:right">${fmt(totFc)}</td><td style="text-align:right">${fmt(totAc)}</td><td style="text-align:right">${fmt(totEtc)}</td><td style="text-align:right">${totOt > 0 ? fmt(totOt) : '—'}</td><td></td><td></td></tr>` : '';
 
   const sTh = (label, key, align) => `<th onclick="resSetSort('${key}')" title="Sort by ${label}" style="cursor:pointer;user-select:none;white-space:nowrap;text-align:${align || 'left'}">${label}${resSort.key === key ? `<span style="color:#2563EB"> ${resSort.dir === 'asc' ? '▲' : '▼'}</span>` : '<span style="color:#CBD5E1"> ↕</span>'}</th>`;
+  const sup = resourcing.support || [];
+  const supFte = sup.reduce((s, x) => s + (+x.fte || 0), 0);
+  const supCard = !isGenesis() ? '' : `
+    <div class="res-card" style="border-radius:14px;margin-top:6px;border:1px solid #E2E8F0;background:#FFFBEB">
+      <div class="res-card-title">Support team
+        <span class="res-hint">reference only · kept separate from the delivery forecast · ${sup.length} people · ${supFte} FTE</span>
+        <span style="float:right;display:inline-flex;gap:6px">
+          <button onclick="supOpen(0)" style="background:#0F2544;color:#fff;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-weight:600;font-size:11px">＋ Add support</button>
+          ${sup.length ? '' : `<button onclick="supSeed()" title="Load the known Genesis support team" style="background:#F1F5F9;color:#475569;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-size:11px">Load Genesis support team</button>`}
+        </span></div>
+      <table class="dtable"><thead><tr><th>Name</th><th>Role</th><th style="text-align:right">FTE</th><th style="width:70px"></th></tr></thead><tbody>${
+        sup.length ? sup.map(x => `<tr><td onclick="supOpen(${x.id})" style="cursor:pointer;font-weight:500;color:#0F2544">${x.name}</td><td style="color:#64748B">${x.role || ''}</td><td style="text-align:right">${x.fte}</td><td style="text-align:center"><button onclick="supDel(${x.id})" title="Remove" style="background:none;border:none;color:#B91C1C;cursor:pointer;font-size:13px">✕</button></td></tr>`).join('')
+          + `<tr style="border-top:2px solid #E2E8F0;font-weight:800;background:#FEF9C3"><td>Total</td><td></td><td style="text-align:right">${supFte} FTE</td><td></td></tr>`
+          : `<tr><td colspan="4" style="text-align:center;color:#94A3B8;padding:20px">No support resources yet. Use <b>Load Genesis support team</b> or <b>＋ Add support</b>.</td></tr>`
+      }</tbody></table></div>`;
   document.getElementById('resourcingView').innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px">
       <div><div style="font-size:20px;font-weight:800;color:#0F2544;letter-spacing:-.01em">Resourcing — Forecast vs Actual</div>
@@ -4487,7 +4536,8 @@ function renderResourcingView() {
     <div class="res-card" style="border-radius:14px"><div class="res-card-title">By domain — elapsed period</div>
       <table class="dtable"><thead><tr><th>Domain</th><th style="text-align:right">Forecast</th><th style="text-align:right">Actual</th><th style="text-align:right">Variance</th><th style="text-align:right">OT</th><th style="text-align:right">Full FC</th></tr></thead><tbody>${domRows}</tbody></table></div>
     ${resGrid ? resGridHTML() : `<div class="res-card" style="border-radius:14px"><div class="res-card-title">Resources <span class="res-hint">click a name to edit · <span style="color:#2563EB">▸ Weekly</span> to enter forecast hours by week</span>${resSelected.size ? `<span style="float:right;display:inline-flex;align-items:center;gap:8px;font-size:12px"><span style="color:#0F2544;font-weight:700">${resSelected.size} selected</span><button onclick="resOpenBulk()" style="background:#0F2544;color:#fff;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-weight:600;font-size:11px">Bulk update</button><button onclick="resClearSel()" title="Unselect all — does not delete anything" style="background:#F1F5F9;color:#475569;border:none;padding:5px 10px;border-radius:8px;cursor:pointer;font-size:11px">Deselect all</button></span>` : ''}</div>
-      <table class="dtable"><thead><tr><th style="text-align:center"><input type="checkbox" onclick="resSelectAll(this.checked)" ${rows.length && rows.every(r => resSelected.has(r.id)) ? 'checked' : ''} title="Select all" style="cursor:pointer"></th>${sTh('Name', 'name')}${sTh('Role', 'role')}${sTh('Domain', 'domain')}${sTh('Release', 'release')}${sTh('FC md', 'fc', 'right')}${sTh('Act md', 'act', 'right')}${sTh('ETC', 'etc', 'right')}${sTh('OT', 'ot', 'right')}${sTh('Status', 'status', 'center')}<th></th></tr></thead><tbody>${resList}${resTotalRow}</tbody></table></div>`}`;
+      <table class="dtable"><thead><tr><th style="text-align:center"><input type="checkbox" onclick="resSelectAll(this.checked)" ${rows.length && rows.every(r => resSelected.has(r.id)) ? 'checked' : ''} title="Select all" style="cursor:pointer"></th>${sTh('Name', 'name')}${sTh('Role', 'role')}${sTh('Domain', 'domain')}${sTh('Release', 'release')}${sTh('FC md', 'fc', 'right')}${sTh('Act md', 'act', 'right')}${sTh('ETC', 'etc', 'right')}${sTh('OT', 'ot', 'right')}${sTh('Status', 'status', 'center')}<th></th></tr></thead><tbody>${resList}${resTotalRow}</tbody></table></div>`}
+    ${supCard}`;
 }
 // ── Weekly grid: resources × weeks, forecast editable + actual row, frozen headers ──
 let resGrid = false;

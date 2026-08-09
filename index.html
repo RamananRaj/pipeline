@@ -4515,6 +4515,28 @@ function rmCatColor(c) { const f = RM_CATS.find(x => x[0] === c); return f ? f[2
 function rmCatName(c) { const f = RM_CATS.find(x => x[0] === c); return f ? f[1] : c; }
 let _rmSeq = 0;
 function rmId() { _rmSeq = Math.max(_rmSeq + 1, Date.now() * 1000); return _rmSeq; }   // strictly increasing → never collides
+
+// ── Roadmap ↔ Resourcing: effort tied to each sub-lane by Domain ──
+function rmDomainMonths(startISO, endISO) { const a = String(startISO).slice(0, 7), b = String(endISO).slice(0, 7); return resMonths().filter(mo => mo.key >= a && mo.key <= b); }
+function rmLaneSpan(ln) { const bs = (ln.bars || []).filter(b => b.start && b.end); if (!bs.length) return null; let s = bs[0].start, e = bs[0].end; bs.forEach(b => { if (b.start < s) s = b.start; if (b.end > e) e = b.end; }); return { s, e }; }
+function rmLanePct(ln) { const bs = (ln.bars || []); if (!bs.length) return 0; let tot = 0, wsum = 0; bs.forEach(b => { const d = Math.max(1, (new Date(b.end) - new Date(b.start)) / 86400000); tot += (+b.pct || 0) * d; wsum += d; }); return wsum ? Math.round(tot / wsum) : 0; }
+/** People + forecast/actual man-days for a domain over a date span, from the resourcing forecast. */
+function rmEffort(domain, startISO, endISO) {
+  const out = { people: 0, fc: 0, ac: 0, ids: new Set() };
+  if (!domain || !startISO || !endISO) return out;
+  const dl = String(domain).trim().toLowerCase(); const months = rmDomainMonths(startISO, endISO);
+  (resourcing.rows || []).forEach(r => {
+    if (String(r.domain || '').trim().toLowerCase() !== dl) return;
+    let has = false;
+    months.forEach(mo => {
+      if (resFcInMonth(r, mo.key)) { const f = +((r.forecast || {})[mo.key] || 0); out.fc += f; if (f > 0) has = true; }
+      if (resAcInMonth(r, mo.key)) out.ac += +((r.actual || {})[mo.key] || 0);
+    });
+    if (has) out.ids.add(r.id);
+  });
+  out.people = out.ids.size; return out;
+}
+function rmLaneEffort(ln) { const sp = rmLaneSpan(ln); const dom = ln.domain || ln.name || ''; const eff = sp ? rmEffort(dom, sp.s, sp.e) : { people: 0, fc: 0, ac: 0, ids: new Set() }; eff.dom = dom; eff.pct = rmLanePct(ln); eff.span = sp; return eff; }
 function rmPct(dateStr) { if (!dateStr) return 0; const d = new Date(dateStr + 'T00:00:00Z'); const days = (d - GSTART) / 86400000; return Math.max(0, Math.min(100, days / GTOTAL * 100)); }
 const RM_DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const RM_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -4588,11 +4610,15 @@ function rmAddLane(sid, gid) { const s = rmFindSection(sid); const g = s && s.gr
 function rmEditLane(sid, gid, lid) {
   const { s, ln } = rmFindBar(sid, gid, lid); if (!ln || !s) return;
   const opts = (s.groups || []).map(gr => [String(gr.id), gr.name ? gr.name : '(top level — no swimlane)']);
+  const doms = [...new Set((resourcing.rows || []).map(r => (r.domain || '').trim()).filter(Boolean))].sort();
+  const domOpts = [['', '— match by sub-lane name —'], ...doms.map(d => [d, d])];
   uiModal('Edit sub-lane', [
     { id: 'name', label: 'Sub-lane name', value: ln.name },
+    { id: 'domain', label: 'Resourcing domain (drives effort)', type: 'select', value: String(ln.domain || ''), options: domOpts },
     { id: 'grp', label: 'Inside swimlane', type: 'select', value: String(gid), options: opts }
   ], 'Save', v => {
     ln.name = v.name.trim();
+    if (v.domain && v.domain.trim()) ln.domain = v.domain.trim(); else delete ln.domain;
     const tg = +v.grp;
     if (tg && tg !== gid) {
       const cur = s.groups.find(x => x.id === gid), tgt = s.groups.find(x => x.id === tg);
@@ -4752,6 +4778,8 @@ function renderRoadmap() {
   const msH = 64;
   const msHtml = mss.map((m, i) => { const l = rmPct(m.date); const tier = (i % 3) * 18; const lineH = msH - tier - 12; return `<div data-rmms data-mid="${m.id}" title="${String(m.label || '').replace(/"/g, '&quot;')} · ${rmFmtDate(m.date)} — drag to move, click to edit" style="position:absolute;left:${l}%;top:${tier}px;cursor:grab;user-select:none;white-space:nowrap"><div style="font-size:9.5px;color:#0F2544;pointer-events:none"><span style="color:#EA580C;font-weight:800">▶</span> ${m.label || ''} <span style="color:#94A3B8;font-weight:400">· ${rmFmtShort(m.date)}</span></div><div style="position:absolute;left:0;top:12px;width:1.5px;height:${lineH}px;background:#F59E0B;opacity:.5;pointer-events:none"></div><div class="rmms-date" style="display:none;position:absolute;left:0;top:-15px;font-size:9px;font-weight:700;color:#7c2d12;background:#FEF3C7;border:1px solid #FCD34D;padding:0 4px;border-radius:4px;pointer-events:none"></div></div>`; }).join('');
 
+  const fmt = n => Math.round(n).toLocaleString();
+  const rollup = [], domAgg = {};
   let body = '', laneIdx = 0;
   roadmap.sections.forEach(s => {
     const collapsed = rmCollapsed.has(s.id);
@@ -4761,11 +4789,16 @@ function renderRoadmap() {
     if (!collapsed) (s.groups || []).forEach(g => {
       if (g.name) body += `<div style="display:flex;align-items:center;background:#EEF2F7;color:#334155;font-size:10.5px;font-weight:700;padding:3px 8px 3px 18px"><div style="flex:1;cursor:pointer;position:sticky;left:18px;z-index:1" onclick="rmEditGroup(${s.id},${g.id})" title="Click to rename this swimlane">${g.name}</div>${laneBtn(`rmAddLane(${s.id},${g.id})`, '+ Sub-lane')} <span style="width:5px"></span>${laneBtn(`rmEditGroup(${s.id},${g.id})`, '✎')}${laneBtn(`rmDelGroup(${s.id},${g.id})`, '×', '#DC2626')}</div>`;
       (g.lanes || []).forEach(ln => {
+        const dom = ln.domain || ln.name || '';
+        const eff = rmLaneEffort(ln);
+        rollup.push({ sw: g.name || '', sl: ln.name || 'Lane', dom: eff.dom, people: eff.people, fc: eff.fc, ac: eff.ac, pct: eff.pct });
+        if (eff.span) { const key = String(eff.dom || '').toLowerCase(); const a = domAgg[key] || (domAgg[key] = { dom: eff.dom, s: null, e: null }); if (!a.s || eff.span.s < a.s) a.s = eff.span.s; if (!a.e || eff.span.e > a.e) a.e = eff.span.e; }
+        const chip = (eff.fc > 0 || eff.people > 0) ? `<div title="${String(dom).replace(/"/g, '&quot;')} · derived from resourcing forecast over the sub-lane dates" style="font-size:9px;color:#1D4ED8;background:#E6F1FB;border-radius:8px;padding:0 6px;align-self:flex-start;white-space:nowrap">${eff.people} ppl · ${fmt(eff.fc)} MD</div>` : '';
         const nb = (ln.bars || []).length;
-        const rowH = Math.max(26, 8 + nb * 16 + Math.max(0, nb - 1) * 4);
-        const bars = (ln.bars || []).map((b, bi) => { const l = rmPct(b.start), w = Math.max(0.6, rmPct(b.end) - rmPct(b.start)); const top = 4 + bi * 20; const pct = Math.max(0, Math.min(100, +b.pct || 0)); return `<div data-rmbar data-sid="${s.id}" data-gid="${g.id}" data-lid="${ln.id}" data-bid="${b.id}" title="${String(b.label || '').replace(/"/g, '&quot;')} (${rmFmtDate(b.start)} → ${rmFmtDate(b.end)}) · ${pct}% complete — drag to move, edges to resize, click to edit" style="position:absolute;top:${top}px;left:${l}%;width:${w}%;height:16px;background:${b.color || rmCatColor(b.cat)};border-radius:3px;color:#fff;font-size:9px;font-weight:700;line-height:16px;overflow:hidden;white-space:nowrap;cursor:grab;user-select:none">${pct > 0 ? `<div style="position:absolute;top:0;bottom:0;left:0;width:${pct}%;background:rgba(255,255,255,.5);pointer-events:none"></div>` : ''}<span data-rmh="l" style="position:absolute;left:0;top:0;bottom:0;width:6px;cursor:col-resize"></span><span style="display:block;padding:0 7px;pointer-events:none;overflow:hidden;text-overflow:ellipsis">${b.label || ''}</span><span data-rmh="r" style="position:absolute;right:0;top:0;bottom:0;width:6px;cursor:col-resize"></span>${pct > 0 ? `<span style="position:absolute;right:6px;top:0;font-size:8px;font-weight:800;pointer-events:none;text-shadow:0 0 2px rgba(0,0,0,.45)">${pct}%</span>` : ''}</div>`; }).join('');
+        const rowH = Math.max(26, 8 + nb * 16 + Math.max(0, nb - 1) * 4) + (chip ? 12 : 0);
+        const bars = (ln.bars || []).map((b, bi) => { const l = rmPct(b.start), w = Math.max(0.6, rmPct(b.end) - rmPct(b.start)); const top = 4 + bi * 20; const pct = Math.max(0, Math.min(100, +b.pct || 0)); const be = rmEffort(dom, b.start, b.end); const eTip = be.fc > 0 ? ` · ${be.people} ppl · ${fmt(be.fc)} MD` : ''; return `<div data-rmbar data-sid="${s.id}" data-gid="${g.id}" data-lid="${ln.id}" data-bid="${b.id}" title="${String(b.label || '').replace(/"/g, '&quot;')} (${rmFmtDate(b.start)} → ${rmFmtDate(b.end)}) · ${pct}% complete${eTip} — drag to move, edges to resize, click to edit" style="position:absolute;top:${top}px;left:${l}%;width:${w}%;height:16px;background:${b.color || rmCatColor(b.cat)};border-radius:3px;color:#fff;font-size:9px;font-weight:700;line-height:16px;overflow:hidden;white-space:nowrap;cursor:grab;user-select:none">${pct > 0 ? `<div style="position:absolute;top:0;bottom:0;left:0;width:${pct}%;background:rgba(255,255,255,.5);pointer-events:none"></div>` : ''}<span data-rmh="l" style="position:absolute;left:0;top:0;bottom:0;width:6px;cursor:col-resize"></span><span style="display:block;padding:0 7px;pointer-events:none;overflow:hidden;text-overflow:ellipsis">${b.label || ''}</span><span data-rmh="r" style="position:absolute;right:0;top:0;bottom:0;width:6px;cursor:col-resize"></span>${pct > 0 ? `<span style="position:absolute;right:6px;top:0;font-size:8px;font-weight:800;pointer-events:none;text-shadow:0 0 2px rgba(0,0,0,.45)">${pct}%</span>` : ''}</div>`; }).join('');
         body += `<div style="display:flex;border-bottom:1px solid #EEF2F7;min-height:${rowH}px">
-          <div style="width:${LBL}px;flex:none;display:flex;align-items:center;gap:5px;padding:0 8px;font-size:11px;color:#334155;background:#F8FAFC;border-right:1px solid #E2E8F0;position:sticky;left:0;z-index:2"><span onclick="rmEditLane(${s.id},${g.id},${ln.id})" title="Rename" style="cursor:pointer;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${ln.name || 'Lane'}</span>${laneBtn(`rmMoveLane(${ln.id},-1)`, '▲')}${laneBtn(`rmMoveLane(${ln.id},1)`, '▼')}${laneBtn(`rmDupLane(${s.id},${g.id},${ln.id})`, '⧉')}${laneBtn(`rmAddBar(${s.id},${g.id},${ln.id})`, '+', '#2563EB')}${laneBtn(`rmDelLane(${s.id},${g.id},${ln.id})`, '×', '#DC2626')}</div>
+          <div style="width:${LBL}px;flex:none;display:flex;flex-direction:column;justify-content:center;gap:2px;padding:3px 8px;font-size:11px;color:#334155;background:#F8FAFC;border-right:1px solid #E2E8F0;position:sticky;left:0;z-index:2"><div style="display:flex;align-items:center;gap:5px"><span onclick="rmEditLane(${s.id},${g.id},${ln.id})" title="Rename · set domain" style="cursor:pointer;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${ln.name || 'Lane'}</span>${laneBtn(`rmMoveLane(${ln.id},-1)`, '▲')}${laneBtn(`rmMoveLane(${ln.id},1)`, '▼')}${laneBtn(`rmDupLane(${s.id},${g.id},${ln.id})`, '⧉')}${laneBtn(`rmAddBar(${s.id},${g.id},${ln.id})`, '+', '#2563EB')}${laneBtn(`rmDelLane(${s.id},${g.id},${ln.id})`, '×', '#DC2626')}</div>${chip}</div>
           <div data-lanetrack data-sid="${s.id}" data-gid="${g.id}" data-lid="${ln.id}" style="flex:1;position:relative;background:${(laneIdx++ % 2) ? '#FAFBFC' : '#fff'}">${todayPct > 0 && todayPct < 100 ? `<div style="position:absolute;top:0;bottom:0;left:${todayPct}%;width:2px;background:#EF4444;z-index:3"></div>` : ''}${bars}</div>
         </div>`;
       });
@@ -4774,6 +4807,16 @@ function renderRoadmap() {
 
   const legend = RM_CATS.map(c => `<span style="display:inline-flex;align-items:center;gap:5px;font-size:10px;color:#64748B;margin-right:12px"><span style="width:20px;height:10px;border-radius:2px;background:${c[2]}"></span>${c[1]}</span>`).join('');
   const empty = !roadmap.sections.length ? `<div style="text-align:center;color:#94A3B8;padding:40px 20px">No roadmap yet. <button onclick="rmAddSection()" style="background:#0F2544;color:#fff;border:none;padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:600;margin:0 6px">+ Add section</button> or <button onclick="rmSeedGenesis()" style="background:#0F766E;color:#fff;border:none;padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:600;margin-left:6px">Load Genesis starter</button></div>` : '';
+
+  // Roll-up panel: per sub-lane rows, grand total de-duplicated by person (each domain's span merged)
+  let gFc = 0, gAc = 0; const gIds = new Set();
+  Object.values(domAgg).forEach(a => { if (!a.s || !a.e) return; const e = rmEffort(a.dom, a.s, a.e); gFc += e.fc; gAc += e.ac; e.ids.forEach(id => gIds.add(id)); });
+  const hasEffort = rollup.some(r => r.fc > 0 || r.people > 0);
+  const rollupPanel = (roadmap.sections.length && hasEffort) ? `<div class="res-card" style="margin-top:16px;border-radius:12px"><div class="res-card-title">Effort by swimlane · sub-lane <span class="res-hint">people &amp; man-days derived from the resourcing forecast over each sub-lane's dates, by Domain</span></div>
+    <table class="dtable"><thead><tr><th>Swimlane</th><th>Sub-lane</th><th>Domain</th><th style="text-align:right">People</th><th style="text-align:right">FC MD</th><th style="text-align:right">Act MD</th><th style="text-align:right">%</th></tr></thead><tbody>
+    ${rollup.map(r => `<tr><td style="color:#64748B">${r.sw || '—'}</td><td style="font-weight:500">${r.sl}</td><td style="color:#64748B">${r.dom || '—'}</td><td style="text-align:right">${r.people || '—'}</td><td style="text-align:right">${r.fc ? fmt(r.fc) : '—'}</td><td style="text-align:right;font-weight:600">${r.ac ? fmt(r.ac) : '—'}</td><td style="text-align:right">${r.pct}%</td></tr>`).join('')}
+    <tr style="border-top:2px solid #E2E8F0;font-weight:700"><td>Total</td><td></td><td style="color:#94A3B8;font-weight:400;font-size:10px">de-duplicated by person</td><td style="text-align:right">${gIds.size}</td><td style="text-align:right">${fmt(gFc)}</td><td style="text-align:right">${fmt(gAc)}</td><td></td></tr>
+    </tbody></table></div>` : '';
 
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px">
@@ -4798,6 +4841,7 @@ function renderRoadmap() {
         ${body}
       </div>
     </div>
+    ${rollupPanel}
     <div style="font-size:10px;color:#94A3B8;margin-top:10px">Click a bar to edit · ▶ milestone to edit · red line = today. Aligns to the timeline window (${GMONTHS[0] ? GMONTHS[0].label : ''} – ${GMONTHS.length ? GMONTHS[GMONTHS.length - 1].label : ''}).</div>`;
 }
 

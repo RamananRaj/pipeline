@@ -304,6 +304,7 @@ body.drag-active *{cursor:grabbing!important;user-select:none;}
       <button class="vtab" id="tabScope" onclick="setView('scope',this)" style="display:none">📋 Scope</button>
       <button class="vtab" id="tabRoadmap" onclick="setView('roadmap',this)" style="display:none">🗺 Timeline View</button>
       <button class="vtab" id="tabResourcing" onclick="setView('resourcing',this)" style="display:none">💷 Resources</button>
+      <button class="vtab" id="tabReport" onclick="setView('report',this)" style="display:none">📄 Report</button>
       <button class="vtab" id="tabSettings" onclick="setView('settings',this)">⚙ Settings</button>
     </div>
     <button class="btn btn-ghost" id="shareBtn" onclick="copyShareUrl(false)" title="Copy shareable link">🔗 Share</button>
@@ -472,6 +473,7 @@ body.drag-active *{cursor:grabbing!important;user-select:none;}
 <div id="resourcingView" style="display:none;padding:16px 24px 40px"></div>
 <div id="roadmapView" style="display:none;padding:16px 24px 40px"></div>
 <div id="scopeView" style="display:none;padding:16px 24px 40px"></div>
+<div id="reportView" style="display:none;padding:16px 24px 40px"></div>
 
 <!-- ── Cloud Sync Modal ── -->
 <div class="mo" id="moCloud" onclick="bgClose(event,'moCloud')">
@@ -1255,7 +1257,8 @@ function setView(v, el) {
   const rsrcMain    = document.getElementById('resourcingView');
   const roadMain    = document.getElementById('roadmapView');
   const scopeMain   = document.getElementById('scopeView');
-  [ganttMain, resMain, lvMain, sizingMain, dashMain, setMain, rsrcMain, roadMain, scopeMain].forEach(m => { if (m) m.style.display = 'none'; });
+  const reportMain  = document.getElementById('reportView');
+  [ganttMain, resMain, lvMain, sizingMain, dashMain, setMain, rsrcMain, roadMain, scopeMain, reportMain].forEach(m => { if (m) m.style.display = 'none'; });
   if (v === 'resources') {
     resMain.style.display = 'block'; renderResView();
   } else if (v === 'levelling') {
@@ -1272,6 +1275,8 @@ function setView(v, el) {
     roadMain.style.display = 'block'; renderRoadmap();
   } else if (v === 'scope') {
     scopeMain.style.display = 'block'; scRender();
+  } else if (v === 'report') {
+    reportMain.style.display = 'block'; renderReport();
   } else {
     ganttMain.style.display = ''; render();
   }
@@ -5257,6 +5262,84 @@ function scRender() {
     <div style="font-size:10px;color:#94A3B8;margin-top:10px">Baseline man-days flow from the mapped resource domains (see mapping below) · AI % is set per segment and adjusts its baseline · % complete rolls up weighted by baseline (or story count when 0).</div>`;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  Genesis Management Report — in-app view, Print/PDF, and email-ready HTML
+// ═══════════════════════════════════════════════════════════════════════════
+function genReportBody() {
+  const fmt = n => Math.round(n).toLocaleString();
+  const T = resTotals(); const mk = resMonths(); const nowKey = new Date().toISOString().slice(0, 7); const rows = resourcing.rows || [];
+  let etcTot = 0;
+  rows.forEach(r => { let rf = 0, rfEl = 0; mk.forEach(mo => { if (!resFcInMonth(r, mo.key)) return; const fv = +((r.forecast || {})[mo.key] || 0); rf += fv; if (mo.key <= nowKey) rfEl += fv; }); etcTot += (r.etc != null ? r.etc : Math.max(0, rf - rfEl)); });
+  const varE = T.aEl - T.fEl, varPct = T.fEl > 0 ? varE / T.fEl * 100 : 0;
+  const activeCount = rows.filter(r => r.active !== false).length;
+  const segs = (scope.segments || []).filter(s => s.release === (scRel || 'R2.2'));
+  let sMd = 0, sAdj = 0, sSt = 0;
+  segs.forEach(seg => { const b = scDomsMD((scope.domainMap || {})[seg.name] || []).fc; sMd += b; sAdj += b * (1 - (+seg.ai || 0) / 100); (seg.themes || []).forEach(t => sSt += (+t.stories || 0)); });
+  const H1 = 'font-size:14px;color:#0F2544;font-weight:800;margin:22px 0 8px;letter-spacing:.02em;text-transform:uppercase';
+  const TB = 'width:100%;border-collapse:collapse;font-family:Arial,Helvetica,sans-serif';
+  const TH = 'text-align:left;padding:6px 10px;border-bottom:2px solid #0F2544;font-size:10.5px;color:#64748B;text-transform:uppercase';
+  const TD = 'padding:5px 10px;border-bottom:1px solid #E2E8F0;font-size:12px;color:#1E293B';
+  const kpi = (l, v, c) => `<td style="padding:10px 12px;border:1px solid #E2E8F0;vertical-align:top"><div style="font-size:10px;color:#94A3B8;text-transform:uppercase;letter-spacing:.4px">${l}</div><div style="font-size:20px;font-weight:800;color:${c || '#0F2544'};margin-top:3px">${v}</div></td>`;
+  const kpis = `<table style="${TB}"><tr>
+    ${kpi('Forecast (total)', fmt(T.fTot) + ' MD')}
+    ${kpi('Actual to date', fmt(T.aEl) + ' MD', '#2563EB')}
+    ${kpi('Variance to date', (varPct > 0 ? '+' : '') + varPct.toFixed(1) + '%', Math.abs(varPct) < 5 ? '#0F2544' : varPct > 0 ? '#B45309' : '#0F766E')}
+    ${kpi('Estimate to complete', fmt(etcTot) + ' MD')}
+    ${kpi('Est. at completion', fmt(T.aEl + etcTot) + ' MD')}
+    ${kpi('Active resources', activeCount)}
+    ${kpi('AI saving', fmt(sMd - sAdj) + ' MD · ' + (sMd > 0 ? Math.round((sMd - sAdj) / sMd * 100) : 0) + '%', '#0F766E')}
+  </tr></table>`;
+  const monthly = mk.map(mo => { let f = 0, a = 0; rows.forEach(r => { if (resFcInMonth(r, mo.key)) f += +((r.forecast || {})[mo.key] || 0); if (resAcInMonth(r, mo.key)) a += +((r.actual || {})[mo.key] || 0); }); return { mo, f, a }; }).filter(m => m.f || m.a);
+  const monthTbl = `<table style="${TB}"><thead><tr><th style="${TH}">Month</th><th style="${TH};text-align:right">Forecast MD</th><th style="${TH};text-align:right">Actual MD</th></tr></thead><tbody>${monthly.map(m => `<tr><td style="${TD}">${m.mo.label}</td><td style="${TD};text-align:right">${fmt(m.f)}</td><td style="${TD};text-align:right">${m.a ? fmt(m.a) : '—'}</td></tr>`).join('')}</tbody></table>`;
+  const dom = {}; rows.forEach(r => { const d = r.domain || '—'; dom[d] = dom[d] || { head: 0, fc: 0, ac: 0, rem: 0 }; let rf = 0, rfEl = 0; mk.forEach(mo => { if (resFcInMonth(r, mo.key)) { const f = +((r.forecast || {})[mo.key] || 0); dom[d].fc += f; rf += f; if (mo.key <= nowKey) rfEl += f; } if (resAcInMonth(r, mo.key)) dom[d].ac += +((r.actual || {})[mo.key] || 0); }); dom[d].rem += (r.etc != null ? r.etc : Math.max(0, rf - rfEl)); if (r.active !== false) dom[d].head++; });
+  const domTbl = `<table style="${TB}"><thead><tr><th style="${TH}">Domain</th><th style="${TH};text-align:right">Head</th><th style="${TH};text-align:right">Forecast</th><th style="${TH};text-align:right">Actual</th><th style="${TH};text-align:right">Remaining</th></tr></thead><tbody>${Object.entries(dom).sort((a, b) => b[1].fc - a[1].fc).map(([d, v]) => `<tr><td style="${TD};font-weight:600">${d}</td><td style="${TD};text-align:right">${v.head}</td><td style="${TD};text-align:right">${fmt(v.fc)}</td><td style="${TD};text-align:right">${fmt(v.ac)}</td><td style="${TD};text-align:right">${fmt(v.rem)}</td></tr>`).join('')}<tr><td style="${TD};font-weight:800">Total</td><td style="${TD};text-align:right;font-weight:800">${Object.values(dom).reduce((s, v) => s + v.head, 0)}</td><td style="${TD};text-align:right;font-weight:800">${fmt(T.fTot)}</td><td style="${TD};text-align:right;font-weight:800">${fmt(T.aTot)}</td><td style="${TD};text-align:right;font-weight:800">${fmt(Object.values(dom).reduce((s, v) => s + v.rem, 0))}</td></tr></tbody></table>`;
+  const scopeTbl = segs.length ? `<table style="${TB}"><thead><tr><th style="${TH}">Segment</th><th style="${TH};text-align:right">Stories</th><th style="${TH};text-align:right">Baseline MD</th><th style="${TH};text-align:right">AI %</th><th style="${TH};text-align:right">AI-adj MD</th><th style="${TH};text-align:right">% complete</th></tr></thead><tbody>${segs.map(seg => { const b = scDomsMD((scope.domainMap || {})[seg.name] || []).fc; const st = scSegTotals(seg); return `<tr><td style="${TD};font-weight:600">${seg.name}</td><td style="${TD};text-align:right">${st.stories || '—'}</td><td style="${TD};text-align:right">${fmt(b)}</td><td style="${TD};text-align:right">${+seg.ai || 0}%</td><td style="${TD};text-align:right">${fmt(b * (1 - (+seg.ai || 0) / 100))}</td><td style="${TD};text-align:right">${st.pct}%</td></tr>`; }).join('')}<tr><td style="${TD};font-weight:800">Release total</td><td style="${TD};text-align:right;font-weight:800">${sSt}</td><td style="${TD};text-align:right;font-weight:800">${fmt(sMd)}</td><td style="${TD}"></td><td style="${TD};text-align:right;font-weight:800">${fmt(sAdj)}</td><td style="${TD}"></td></tr></tbody></table>` : `<div style="font-size:12px;color:#94A3B8">No scope defined for ${scRel || 'this release'}.</div>`;
+  const resDomSet = new Set(rows.map(r => (r.domain || '').trim().toLowerCase()).filter(Boolean));
+  const tlDom = {}, rsDom = {}; let barCount = 0;
+  (roadmap.sections || []).forEach(s => (s.groups || []).forEach(g => (g.lanes || []).forEach(ln => { let dm = (ln.domain || '').trim(); if (!dm && resDomSet.has((ln.name || '').trim().toLowerCase())) dm = (ln.name || '').trim(); (ln.bars || []).forEach(b => { barCount++; if (!dm || !b.start || !b.end) return; const dl = dm.toLowerCase(); mk.forEach(mo => { if (mo.key >= b.start.slice(0, 7) && mo.key <= b.end.slice(0, 7)) (tlDom[dl] = tlDom[dl] || { d: dm, m: new Set() }).m.add(mo.key); }); }); })));
+  rows.forEach(r => { const dm = (r.domain || '').trim(); if (!dm) return; const dl = dm.toLowerCase(); mk.forEach(mo => { if (resFcInMonth(r, mo.key) && (+((r.forecast || {})[mo.key] || 0)) > 0) (rsDom[dl] = rsDom[dl] || { d: dm, m: new Set() }).m.add(mo.key); }); });
+  const mLab = k => (mk.find(m => m.key === k) || {}).label || k;
+  const noRes = []; Object.keys(tlDom).forEach(dl => { const t = tlDom[dl], r = rsDom[dl]; const miss = [...t.m].filter(k => !(r && r.m.has(k))).sort(); if (miss.length) noRes.push(t.d + ' (' + miss.map(mLab).join(', ') + ')'); });
+  const noAct = []; Object.keys(rsDom).forEach(dl => { const r = rsDom[dl], t = tlDom[dl]; const miss = [...r.m].filter(k => !(t && t.m.has(k))).sort(); if (miss.length) noAct.push(r.d + ' (' + miss.map(mLab).join(', ') + ')'); });
+  const incompleteN = rows.filter(r => !(r.name || '').trim() || !(r.domain || '').trim()).length;
+  const flag = (label, n, items, color) => `<div style="margin:4px 0"><span style="display:inline-block;min-width:22px;text-align:center;background:${n ? color : '#DCFCE7'};color:${n ? '#fff' : '#15803D'};font-weight:700;border-radius:9px;padding:1px 7px;font-size:11px">${n}</span> <strong style="font-size:12px">${label}</strong>${items && items.length ? `<div style="font-size:11px;color:#64748B;margin:2px 0 0 30px">${items.slice(0, 12).join(' · ')}${items.length > 12 ? ' …' : ''}</div>` : ''}</div>`;
+  const coverage = `${flag('Activity planned, no resources', noRes.length, noRes, '#B45309')}${flag('Resources allocated, no activity', noAct.length, noAct, '#2563EB')}${flag('Incomplete resource records', incompleteN, null, '#DC2626')}`;
+  const tlSummary = `<div style="font-size:12px;color:#1E293B">${(roadmap.sections || []).length} tracks · ${barCount} activities · ${(roadmap.milestones || []).length} milestones on the timeline.</div>`;
+  return `
+    <div style="border-bottom:3px solid #0F2544;padding-bottom:10px;margin-bottom:8px">
+      <div style="font-size:20px;font-weight:800;color:#0F2544">Genesis — Programme Management Report</div>
+      <div style="font-size:12px;color:#64748B;margin-top:3px">Release ${scRel || 'R2.2'} · generated ${new Date().toLocaleDateString()} · forecast in man-days</div>
+    </div>
+    <div style="${H1}">1 · Programme summary</div>${kpis}
+    <div style="${H1}">2 · Resourcing — forecast vs actual by month</div>${monthTbl}
+    <div style="${H1}">Resourcing — by domain</div>${domTbl}
+    <div style="${H1}">3 · Scope by segment — ${scRel || 'R2.2'}</div>${scopeTbl}
+    <div style="${H1}">4 · Timeline &amp; coverage</div>${tlSummary}<div style="margin-top:8px">${coverage}</div>`;
+}
+function renderReport() {
+  const el = document.getElementById('reportView'); if (!el) return;
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px">
+      <div style="font-size:20px;font-weight:800;color:#0F2544">Management report</div>
+      <div style="display:flex;gap:8px"><button class="btn btn-ghost btn-sm" onclick="reportCopyHTML()" style="font-size:11px">📧 Copy HTML (email)</button><button class="btn btn-ghost btn-sm" onclick="reportPrint()" style="font-size:11px">🖨 Print / PDF</button></div>
+    </div>
+    <div style="max-width:920px;background:#fff;border:1px solid #E2E8F0;border-radius:12px;padding:26px 30px">${genReportBody()}</div>`;
+}
+function reportPrint() {
+  const doc = `<!doctype html><html><head><meta charset="utf-8"><title>${ORG} — Management Report</title><style>@page{size:A4 portrait;margin:14mm}body{font-family:Arial,Helvetica,sans-serif;color:#1E293B;margin:0}table{page-break-inside:auto}</style></head><body>${genReportBody()}<script>window.onload=function(){setTimeout(function(){window.print();},250);};<\/script></body></html>`;
+  const w = window.open('', '_blank'); if (!w) { alert('Please allow pop-ups to print the report.'); return; }
+  w.document.open(); w.document.write(doc); w.document.close();
+}
+function reportCopyHTML() {
+  const html = `<div style="font-family:Arial,Helvetica,sans-serif;color:#1E293B">${genReportBody()}</div>`;
+  const done = () => alert('Report HTML copied — paste it into your email.');
+  const fallback = () => { navigator.clipboard.writeText(html).then(done).catch(() => alert('Copy failed — use Print / PDF instead.')); };
+  try {
+    if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }), 'text/plain': new Blob([html], { type: 'text/plain' }) })]).then(done).catch(fallback);
+    else fallback();
+  } catch (e) { fallback(); }
+}
+
 function applyInternalMode() {
   const genesis = isGenesis();
   // AAR portfolio tabs — hidden for Genesis (its own product surface)
@@ -5266,11 +5349,13 @@ function applyInternalMode() {
   const rs = document.getElementById('tabResourcing');
   const rm = document.getElementById('tabRoadmap');
   const sc = document.getElementById('tabScope');
+  const rp = document.getElementById('tabReport');
   if (d) d.style.display = (genesis || internalMode) ? '' : 'none';   // Genesis always has a Dashboard landing
   if (s) s.style.display = internalMode ? '' : 'none';
   if (rs) rs.style.display = (internalMode && genesis) ? '' : 'none';
   if (rm) rm.style.display = (internalMode && genesis) ? '' : 'none';
   if (sc) sc.style.display = (internalMode && genesis) ? '' : 'none';
+  if (rp) rp.style.display = (internalMode && genesis) ? '' : 'none';
   const btn = document.getElementById('internalToggle');
   if (btn) {
     btn.textContent  = internalMode ? '🔓 Internal' : '🔒';
@@ -5284,7 +5369,7 @@ function applyInternalMode() {
   const aarViews = ['stream', 'squad', 'status', 'resources', 'levelling', 'sizing'];
   const onHidden = (genesis && aarViews.includes(viewMode))
     || (!internalMode && (viewMode === 'dashboard' || viewMode === 'settings'))
-    || ((viewMode === 'resourcing' || viewMode === 'roadmap' || viewMode === 'scope') && !(internalMode && genesis));
+    || ((viewMode === 'resourcing' || viewMode === 'roadmap' || viewMode === 'scope' || viewMode === 'report') && !(internalMode && genesis));
   if (onHidden) {
     if (genesis) setView('dashboard', document.getElementById('tabDashboard'));
     else { const t = [...document.querySelectorAll('.vtab')].find(x => x.textContent.includes('By Stream')); setView('stream', t); }

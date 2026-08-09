@@ -3611,7 +3611,33 @@ function genDomainPoolPanel() {
     <table class="dtable"><thead><tr><th>Domain</th><th style="text-align:right">Head</th><th style="text-align:right">Forecast</th><th style="text-align:right">Actual</th><th style="text-align:right">Remaining</th><th style="text-align:right">Headcount / month</th></tr></thead>
     <tbody>${body}<tr style="border-top:2px solid #E2E8F0;font-weight:700"><td>Total</td><td style="text-align:right">${tot.head}</td><td style="text-align:right">${fmt(tot.fc)}</td><td style="text-align:right">${fmt(tot.ac)}</td><td style="text-align:right">${fmt(tot.rem)}</td><td></td></tr></tbody></table></div>`;
 }
+/** Genesis Dashboard — Resourcing Forecast vs Actual summary + by-Domain pool (no AAR utilisation). */
+function genDashboardHTML() {
+  const T = resTotals(); const fmt = n => Math.round(n).toLocaleString();
+  const mk = resMonths(); const nowKey = new Date().toISOString().slice(0, 7); const rows = resourcing.rows || [];
+  let etcTot = 0;
+  rows.forEach(r => { let rf = 0, rfEl = 0; mk.forEach(mo => { if (!resFcInMonth(r, mo.key)) return; const fv = +((r.forecast || {})[mo.key] || 0); rf += fv; if (mo.key <= nowKey) rfEl += fv; }); etcTot += (r.etc != null ? r.etc : Math.max(0, rf - rfEl)); });
+  const varE = T.aEl - T.fEl, varPct = T.fEl > 0 ? varE / T.fEl * 100 : 0;
+  const activeCount = rows.filter(r => r.active !== false).length;
+  const kpi = (l, v, s, c) => `<div style="background:#fff;border:1px solid #EEF1F6;border-radius:14px;padding:16px 18px;flex:1;min-width:150px;box-shadow:0 1px 2px rgba(15,37,68,.04)"><div style="font-size:10.5px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:.6px">${l}</div><div style="font-size:26px;font-weight:800;color:${c || '#0F2544'};margin-top:6px;letter-spacing:-.01em">${v}</div><div style="font-size:11px;color:#64748B;margin-top:5px">${s}</div></div>`;
+  const monthly = mk.map(mo => { let f = 0, a = 0; rows.forEach(r => { if (resFcInMonth(r, mo.key)) f += +((r.forecast || {})[mo.key] || 0); if (resAcInMonth(r, mo.key)) a += +((r.actual || {})[mo.key] || 0); }); return { mo, f, a }; });
+  const maxV = Math.max(1, ...monthly.map(m => Math.max(m.f, m.a)));
+  const bars = `<div style="display:flex;align-items:flex-end;gap:8px;height:170px;padding-top:6px">${monthly.map(m => { const fh = Math.round(m.f / maxV * 150), ah = Math.round(m.a / maxV * 150); return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:5px"><div style="display:flex;align-items:flex-end;gap:3px;height:152px"><div title="forecast ${fmt(m.f)} md" style="width:14px;height:${fh}px;background:#CBD5E1;border-radius:3px 3px 0 0"></div>${m.a > 0 ? `<div title="actual ${fmt(m.a)} md" style="width:14px;height:${ah}px;background:#2563EB;border-radius:3px 3px 0 0"></div>` : ''}</div><div style="font-size:10px;color:#94A3B8">${m.mo.label}</div></div>`; }).join('')}</div>`;
+  return `
+    <div style="margin-bottom:18px"><div style="font-size:20px;font-weight:800;color:#0F2544">Genesis — Programme Dashboard</div><div style="font-size:12px;color:#64748B;margin-top:2px">Resourcing forecast vs actual &amp; resource pool by domain</div></div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px">
+      ${kpi('Forecast (total)', fmt(T.fTot), 'man-days in window', '#0F2544')}
+      ${kpi('Actual to date', fmt(T.aEl), 'of ' + fmt(T.fEl) + ' planned (elapsed)', '#2563EB')}
+      ${kpi('Variance to date', (varPct > 0 ? '+' : '') + varPct.toFixed(1) + '%', Math.round(varE) + ' md vs plan', Math.abs(varPct) < 5 ? '#0F2544' : varPct > 0 ? '#B45309' : '#0F766E')}
+      ${kpi('Estimate to complete', fmt(etcTot), 'man-days remaining', '#0F2544')}
+      ${kpi('Est. at completion', fmt(T.aEl + etcTot), Math.round(T.aEl + etcTot - T.fTot) + ' vs baseline ' + fmt(T.fTot), (T.aEl + etcTot) > T.fTot * 1.02 ? '#B45309' : '#0F766E')}
+      ${kpi('Active resources', activeCount, 'of ' + rows.length + ' total', '#0F2544')}
+    </div>
+    <div class="res-card" style="border-radius:14px"><div class="res-card-title">Forecast vs Actual by month <span class="res-hint">grey = forecast · blue = actual (timesheet upload)</span></div>${bars}</div>
+    ${genDomainPoolPanel()}`;
+}
 function renderDashboardView() {
+  if (isGenesis()) { document.getElementById('dashboardView').innerHTML = genDashboardHTML(); return; }
   const { rows, kpi } = buildUtilModel();
   const cap = computeCapacity();
   const kpiCard = (label, val, sub, color, tip) => `
@@ -4341,6 +4367,8 @@ function renderResourcingView() {
     return mainRow + detail;
   }).join('') : `<tr><td colspan="11" style="text-align:center;color:#94A3B8;padding:18px">No resources yet — <strong>Import forecast</strong> or <strong>Add resource</strong>.</td></tr>`;
   if (resList === '' && resSearch) resList = `<tr><td colspan="11" style="text-align:center;color:#94A3B8;padding:18px">No resources match “${resSearch}”.</td></tr>`;
+  const totFc = shown.reduce((s, m) => s + m.rf, 0), totAc = shown.reduce((s, m) => s + m.ra, 0), totEtc = shown.reduce((s, m) => s + m.etc, 0), totOt = shown.reduce((s, m) => s + m.rot, 0);
+  const resTotalRow = shown.length ? `<tr style="border-top:2px solid #E2E8F0;font-weight:800;background:#F8FAFC"><td></td><td>Total${resSearch ? ' (' + shown.length + ')' : ''}</td><td></td><td></td><td></td><td style="text-align:right">${fmt(totFc)}</td><td style="text-align:right">${fmt(totAc)}</td><td style="text-align:right">${fmt(totEtc)}</td><td style="text-align:right">${totOt > 0 ? fmt(totOt) : '—'}</td><td></td><td></td></tr>` : '';
 
   const sTh = (label, key, align) => `<th onclick="resSetSort('${key}')" title="Sort by ${label}" style="cursor:pointer;user-select:none;white-space:nowrap;text-align:${align || 'left'}">${label}${resSort.key === key ? `<span style="color:#2563EB"> ${resSort.dir === 'asc' ? '▲' : '▼'}</span>` : '<span style="color:#CBD5E1"> ↕</span>'}</th>`;
   document.getElementById('resourcingView').innerHTML = `
@@ -4369,7 +4397,7 @@ function renderResourcingView() {
     <div class="res-card" style="border-radius:14px"><div class="res-card-title">By domain — elapsed period</div>
       <table class="dtable"><thead><tr><th>Domain</th><th style="text-align:right">Forecast</th><th style="text-align:right">Actual</th><th style="text-align:right">Variance</th><th style="text-align:right">OT</th><th style="text-align:right">Full FC</th></tr></thead><tbody>${domRows}</tbody></table></div>
     ${resGrid ? resGridHTML() : `<div class="res-card" style="border-radius:14px"><div class="res-card-title">Resources <span class="res-hint">click a name to edit · <span style="color:#2563EB">▸ Weekly</span> to enter forecast hours by week</span>${resSelected.size ? `<span style="float:right;display:inline-flex;align-items:center;gap:8px;font-size:12px"><span style="color:#0F2544;font-weight:700">${resSelected.size} selected</span><button onclick="resOpenBulk()" style="background:#0F2544;color:#fff;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-weight:600;font-size:11px">Bulk update</button><button onclick="resClearSel()" style="background:#F1F5F9;color:#475569;border:none;padding:5px 10px;border-radius:8px;cursor:pointer;font-size:11px">Clear</button></span>` : ''}</div>
-      <table class="dtable"><thead><tr><th style="text-align:center"><input type="checkbox" onclick="resSelectAll(this.checked)" ${rows.length && rows.every(r => resSelected.has(r.id)) ? 'checked' : ''} title="Select all" style="cursor:pointer"></th>${sTh('Name', 'name')}${sTh('Role', 'role')}${sTh('Domain', 'domain')}${sTh('Release', 'release')}${sTh('FC md', 'fc', 'right')}${sTh('Act md', 'act', 'right')}${sTh('ETC', 'etc', 'right')}${sTh('OT', 'ot', 'right')}${sTh('Status', 'status', 'center')}<th></th></tr></thead><tbody>${resList}</tbody></table></div>`}`;
+      <table class="dtable"><thead><tr><th style="text-align:center"><input type="checkbox" onclick="resSelectAll(this.checked)" ${rows.length && rows.every(r => resSelected.has(r.id)) ? 'checked' : ''} title="Select all" style="cursor:pointer"></th>${sTh('Name', 'name')}${sTh('Role', 'role')}${sTh('Domain', 'domain')}${sTh('Release', 'release')}${sTh('FC md', 'fc', 'right')}${sTh('Act md', 'act', 'right')}${sTh('ETC', 'etc', 'right')}${sTh('OT', 'ot', 'right')}${sTh('Status', 'status', 'center')}<th></th></tr></thead><tbody>${resList}${resTotalRow}</tbody></table></div>`}`;
 }
 // ── Weekly grid: resources × weeks, forecast editable + actual row, frozen headers ──
 let resGrid = false;

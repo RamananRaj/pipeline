@@ -304,6 +304,7 @@ body.drag-active *{cursor:grabbing!important;user-select:none;}
       <button class="vtab" id="tabScope" onclick="setView('scope',this)" style="display:none">📋 Scope</button>
       <button class="vtab" id="tabRoadmap" onclick="setView('roadmap',this)" style="display:none">🗺 Timeline View</button>
       <button class="vtab" id="tabResourcing" onclick="setView('resourcing',this)" style="display:none">💷 Resources</button>
+      <button class="vtab" id="tabGovernance" onclick="setView('governance',this)" style="display:none">⚖️ Governance</button>
       <button class="vtab" id="tabReport" onclick="setView('report',this)" style="display:none">📄 Report</button>
       <button class="vtab" id="tabSettings" onclick="setView('settings',this)">⚙ Settings</button>
     </div>
@@ -474,6 +475,7 @@ body.drag-active *{cursor:grabbing!important;user-select:none;}
 <div id="roadmapView" style="display:none;padding:16px 24px 40px"></div>
 <div id="scopeView" style="display:none;padding:16px 24px 40px"></div>
 <div id="reportView" style="display:none;padding:16px 24px 40px"></div>
+<div id="governanceView" style="display:none;padding:16px 24px 40px"></div>
 
 <!-- ── Cloud Sync Modal ── -->
 <div class="mo" id="moCloud" onclick="bgClose(event,'moCloud')">
@@ -932,7 +934,8 @@ function cloudPayload() {
            sizingConfig: (typeof sizingConfig !== 'undefined' ? sizingConfig : null),
            resourcing: (typeof resourcing !== 'undefined' ? resourcing : { rows: [] }),
            roadmap: (typeof roadmap !== 'undefined' ? roadmap : { sections: [], milestones: [] }),
-           scope: (typeof scope !== 'undefined' ? scope : { segments: [] }) };
+           scope: (typeof scope !== 'undefined' ? scope : { segments: [] }),
+           governance: (typeof governance !== 'undefined' ? governance : { complexity: {}, crs: [], risks: [] }) };
 }
 
 /** Debounced push of the full payload to the configured cloud backend. */
@@ -1258,7 +1261,8 @@ function setView(v, el) {
   const roadMain    = document.getElementById('roadmapView');
   const scopeMain   = document.getElementById('scopeView');
   const reportMain  = document.getElementById('reportView');
-  [ganttMain, resMain, lvMain, sizingMain, dashMain, setMain, rsrcMain, roadMain, scopeMain, reportMain].forEach(m => { if (m) m.style.display = 'none'; });
+  const govMain     = document.getElementById('governanceView');
+  [ganttMain, resMain, lvMain, sizingMain, dashMain, setMain, rsrcMain, roadMain, scopeMain, reportMain, govMain].forEach(m => { if (m) m.style.display = 'none'; });
   if (v === 'resources') {
     resMain.style.display = 'block'; renderResView();
   } else if (v === 'levelling') {
@@ -1277,6 +1281,8 @@ function setView(v, el) {
     scopeMain.style.display = 'block'; scRender();
   } else if (v === 'report') {
     reportMain.style.display = 'block'; renderReport();
+  } else if (v === 'governance') {
+    govMain.style.display = 'block'; renderGovernance();
   } else {
     ganttMain.style.display = ''; render();
   }
@@ -2397,7 +2403,14 @@ function applyCloudData(data) {
     }
     if (data.scope && Array.isArray(data.scope.segments)) {
       scope = data.scope;
+      if (!scope.domainMap) scope.domainMap = {}; if (!scope.resourcePlan) scope.resourcePlan = {};
       localStorage.setItem(KP + 'scope', JSON.stringify(scope));
+    }
+    if (data.governance && typeof data.governance === 'object') {
+      governance = data.governance;
+      if (!governance.complexity) governance.complexity = { S: 3, M: 8, L: 20, XL: 40 };
+      if (!Array.isArray(governance.crs)) governance.crs = []; if (!Array.isArray(governance.risks)) governance.risks = [];
+      localStorage.setItem(KP + 'governance', JSON.stringify(governance));
     }
   }
   migrateProjects();
@@ -3347,6 +3360,13 @@ if (!scope || !Array.isArray(scope.segments)) scope = { segments: [] };
 if (!scope.domainMap || typeof scope.domainMap !== 'object') scope.domainMap = {};
 if (!scope.resourcePlan || typeof scope.resourcePlan !== 'object') scope.resourcePlan = {};
 function persistScope() { localStorage.setItem(KP + 'scope', JSON.stringify(scope)); pushCloud(); }
+// ── Stage 4: Governance (Genesis) — Change Requests + Risks & Issues, with a Genesis-only complexity matrix ──
+let governance = JSON.parse(localStorage.getItem(KP + 'governance') || 'null') || null;
+if (!governance || typeof governance !== 'object') governance = {};
+if (!governance.complexity || typeof governance.complexity !== 'object') governance.complexity = { S: 3, M: 8, L: 20, XL: 40 };
+if (!Array.isArray(governance.crs)) governance.crs = [];
+if (!Array.isArray(governance.risks)) governance.risks = [];
+function persistGovernance() { localStorage.setItem(KP + 'governance', JSON.stringify(governance)); pushCloud(); }
 let workOrders = JSON.parse(localStorage.getItem(KP + 'wos') || 'null') || (ORG === 'AAR' ? WO_DEFAULTS.map(w => ({ ...w, projects:[...w.projects] })) : []);
 workOrders.forEach(w => { if (!Array.isArray(w.projects)) w.projects = []; if (w.ba == null) w.ba = 0; });
 let nextWoId    = Math.max(0, ...workOrders.map(w => w.id || 0)) + 1;
@@ -5338,6 +5358,11 @@ function genReportBody() {
   const flag = (label, n, items, color) => `<div style="margin:4px 0"><span style="display:inline-block;min-width:22px;text-align:center;background:${n ? color : '#DCFCE7'};color:${n ? '#fff' : '#15803D'};font-weight:700;border-radius:9px;padding:1px 7px;font-size:11px">${n}</span> <strong style="font-size:12px">${label}</strong>${items && items.length ? `<div style="font-size:11px;color:#64748B;margin:2px 0 0 30px">${items.slice(0, 12).join(' · ')}${items.length > 12 ? ' …' : ''}</div>` : ''}</div>`;
   const coverage = `${flag('Activity planned, no resources', noRes.length, noRes, '#B45309')}${flag('Resources allocated, no activity', noAct.length, noAct, '#2563EB')}${flag('Incomplete resource records', incompleteN, null, '#DC2626')}`;
   const tlSummary = `<div style="font-size:12px;color:#1E293B">${(roadmap.sections || []).length} tracks · ${barCount} activities · ${(roadmap.milestones || []).length} milestones on the timeline.</div>`;
+  // Governance tables
+  const crOpen = (governance.crs || []).filter(c => !['Rejected', 'Implemented'].includes(c.status));
+  const crEff = crOpen.reduce((s, c) => s + govCrMd(c), 0);
+  const crTbl = (governance.crs || []).length ? `<table style="${TB}"><thead><tr><th style="${TH}">Ref</th><th style="${TH}">Title</th><th style="${TH}">Area</th><th style="${TH}">Cx</th><th style="${TH};text-align:right">Est MD</th><th style="${TH}">Status</th></tr></thead><tbody>${governance.crs.map(c => `<tr><td style="${TD};font-weight:600">${c.ref || ''}</td><td style="${TD}">${c.title || ''}</td><td style="${TD};color:#64748B">${c.area || '—'}</td><td style="${TD}">${c.complexity}</td><td style="${TD};text-align:right">${fmt(govCrMd(c))}</td><td style="${TD}">${c.status}</td></tr>`).join('')}<tr><td style="${TD};font-weight:800" colspan="4">Open CR effort</td><td style="${TD};text-align:right;font-weight:800">${fmt(crEff)}</td><td style="${TD}"></td></tr></tbody></table>` : `<div style="font-size:12px;color:#94A3B8">No change requests.</div>`;
+  const riskTbl = (governance.risks || []).length ? `<table style="${TB}"><thead><tr><th style="${TH}">Ref</th><th style="${TH}">Title</th><th style="${TH}">Type</th><th style="${TH}">RAG</th><th style="${TH}">Status</th><th style="${TH}">Owner</th></tr></thead><tbody>${governance.risks.map(r => { const rag = govRag(r.prob, r.impact); return `<tr><td style="${TD};font-weight:600">${r.ref || ''}</td><td style="${TD}">${r.title || ''}${r.impacted ? ` <span style="color:#94A3B8">(impacts: ${r.impacted})</span>` : ''}</td><td style="${TD}">${r.type}</td><td style="${TD};color:${GOV_RAGC[rag]};font-weight:700">${rag}</td><td style="${TD}">${r.status}</td><td style="${TD};color:#64748B">${r.owner || '—'}</td></tr>`; }).join('')}</tbody></table>` : `<div style="font-size:12px;color:#94A3B8">No risks or issues.</div>`;
   const sd = iso => { try { return rmFmtShort(iso); } catch (e) { return iso || ''; } };
   const trackRows = [];
   (roadmap.sections || []).forEach(s => (s.groups || []).forEach(g => (g.lanes || []).forEach(ln => (ln.bars || []).forEach(b => { trackRows.push(`<tr><td style="${TD};font-weight:600">${s.name || ''}</td><td style="${TD}">${(g.name ? g.name + ' · ' : '') + (ln.name || '')}</td><td style="${TD}">${b.label || ''}</td><td style="${TD};white-space:nowrap">${sd(b.start)}</td><td style="${TD};white-space:nowrap">${sd(b.end)}</td><td style="${TD};text-align:right">${Math.max(0, Math.min(100, +b.pct || 0))}%</td></tr>`); }))));
@@ -5355,7 +5380,9 @@ function genReportBody() {
     <div style="${H1}">3 · Scope by segment — ${rel}</div>${scopeTbl}
     <div style="${H1}">4 · Timeline — tracks &amp; activities</div>${tlSummary}<div style="margin-top:8px">${trackTbl}</div>
     ${msTbl ? `<div style="${H1}">Milestones</div>${msTbl}` : ''}
-    <div style="${H1}">5 · Coverage checks</div><div style="margin-top:4px">${coverage}</div>`;
+    <div style="${H1}">5 · Coverage checks</div><div style="margin-top:4px">${coverage}</div>
+    <div style="${H1}">6 · Change Requests</div>${crTbl}
+    <div style="${H1}">7 · Risks &amp; Issues</div>${riskTbl}`;
 }
 function renderReport() {
   const el = document.getElementById('reportView'); if (!el) return;
@@ -5387,6 +5414,82 @@ function reportCopyHTML() {
   } catch (e) { fallback(); }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  STAGE 4 — Governance (Genesis): Change Requests + Risks & Issues
+// ═══════════════════════════════════════════════════════════════════════════
+const GOV_RAGC = { Red: '#DC2626', Amber: '#F59E0B', Green: '#16A34A' };
+function govRag(p, i) { const s = { L: 1, M: 2, H: 3 }; const v = (s[p] || 0) * (s[i] || 0); return v >= 6 ? 'Red' : v >= 3 ? 'Amber' : 'Green'; }
+function govCrMd(c) { return c.md != null ? c.md : (governance.complexity[c.complexity] || 0); }
+function govSetComplexity(t, v) { governance.complexity[t] = Math.max(0, +v || 0); persistGovernance(); renderGovernance(); }
+function govCRopen(id) {
+  const c = id ? governance.crs.find(x => x.id === id) : null;
+  uiModal(id ? 'Edit change request' : 'New change request', [
+    { id: 'title', label: 'Title', value: (c && c.title) || '' },
+    { id: 'area', label: 'Impacted area(s)', value: (c && c.area) || '', placeholder: 'e.g. Billing, CRM' },
+    { id: 'complexity', label: 'Complexity (drives estimate)', type: 'select', value: (c && c.complexity) || 'M', options: [['S', 'S — Small (' + (governance.complexity.S || 0) + ' MD)'], ['M', 'M — Medium (' + (governance.complexity.M || 0) + ' MD)'], ['L', 'L — Large (' + (governance.complexity.L || 0) + ' MD)'], ['XL', 'XL — Very large (' + (governance.complexity.XL || 0) + ' MD)']] },
+    { id: 'status', label: 'Status', type: 'select', value: (c && c.status) || 'Raised', options: [['Raised', 'Raised'], ['Assessing', 'Assessing'], ['Approved', 'Approved'], ['Rejected', 'Rejected'], ['Implemented', 'Implemented']] },
+    { id: 'owner', label: 'Owner', value: (c && c.owner) || '' },
+    { id: 'notes', label: 'Impact assessment / notes', value: (c && c.notes) || '' }
+  ], 'Save', v => {
+    if (!v.title.trim()) return;
+    if (c) { Object.assign(c, { title: v.title.trim(), area: v.area.trim(), complexity: v.complexity, status: v.status, owner: v.owner.trim(), notes: v.notes.trim() }); }
+    else { governance.crs.push({ id: rmId(), ref: 'CR-' + String(governance.crs.length + 1).padStart(3, '0'), title: v.title.trim(), area: v.area.trim(), complexity: v.complexity, status: v.status, owner: v.owner.trim(), notes: v.notes.trim(), raised: new Date().toISOString().slice(0, 10) }); }
+    persistGovernance(); renderGovernance();
+  });
+}
+function govCRdel(id) { uiConfirm('Delete change request', 'Remove this CR?', () => { governance.crs = governance.crs.filter(x => x.id !== id); persistGovernance(); renderGovernance(); }); }
+function govRiskOpen(id) {
+  const r = id ? governance.risks.find(x => x.id === id) : null;
+  const phases = [...new Set((roadmap.sections || []).map(s => s.name).filter(Boolean))];
+  uiModal(id ? 'Edit risk / issue' : 'New risk / issue', [
+    { id: 'type', label: 'Type', type: 'select', value: (r && r.type) || 'Risk', options: [['Risk', 'Risk'], ['Issue', 'Issue']] },
+    { id: 'title', label: 'Title', value: (r && r.title) || '' },
+    { id: 'phase', label: 'Phase / track', type: 'select', value: (r && r.phase) || '', options: [['', '— none —']].concat(phases.map(p => [p, p])) },
+    { id: 'prob', label: 'Probability', type: 'select', value: (r && r.prob) || 'M', options: [['L', 'Low'], ['M', 'Medium'], ['H', 'High']] },
+    { id: 'impact', label: 'Impact', type: 'select', value: (r && r.impact) || 'M', options: [['L', 'Low'], ['M', 'Medium'], ['H', 'High']] },
+    { id: 'owner', label: 'Owner', value: (r && r.owner) || '' },
+    { id: 'status', label: 'Status', type: 'select', value: (r && r.status) || 'Open', options: [['Open', 'Open'], ['Mitigating', 'Mitigating'], ['Closed', 'Closed']] },
+    { id: 'impacted', label: 'Impacted items', value: (r && r.impacted) || '', placeholder: 'segments / deliverables affected' },
+    { id: 'mitigation', label: 'Mitigation / action', value: (r && r.mitigation) || '' }
+  ], 'Save', v => {
+    if (!v.title.trim()) return;
+    if (r) { Object.assign(r, { type: v.type, title: v.title.trim(), phase: v.phase, prob: v.prob, impact: v.impact, owner: v.owner.trim(), status: v.status, impacted: v.impacted.trim(), mitigation: v.mitigation.trim() }); }
+    else { governance.risks.push({ id: rmId(), ref: (v.type === 'Issue' ? 'I' : 'R') + '-' + String(governance.risks.length + 1).padStart(3, '0'), type: v.type, title: v.title.trim(), phase: v.phase, prob: v.prob, impact: v.impact, owner: v.owner.trim(), status: v.status, impacted: v.impacted.trim(), mitigation: v.mitigation.trim(), raised: new Date().toISOString().slice(0, 10) }); }
+    persistGovernance(); renderGovernance();
+  });
+}
+function govRiskDel(id) { uiConfirm('Delete', 'Remove this risk / issue?', () => { governance.risks = governance.risks.filter(x => x.id !== id); persistGovernance(); renderGovernance(); }); }
+function renderGovernance() {
+  const el = document.getElementById('governanceView'); if (!el) return;
+  const fmt = n => Math.round(n).toLocaleString();
+  const openCRs = governance.crs.filter(c => !['Rejected', 'Implemented'].includes(c.status));
+  const crEffort = openCRs.reduce((s, c) => s + govCrMd(c), 0);
+  const openRisks = governance.risks.filter(r => r.status !== 'Closed');
+  const redRisks = openRisks.filter(r => govRag(r.prob, r.impact) === 'Red');
+  const matrix = ['S', 'M', 'L', 'XL'].map(t => `<div style="text-align:center"><div style="font-size:11px;font-weight:800;color:#0F2544">${t}</div><input type="number" min="0" step="1" value="${governance.complexity[t] || 0}" onchange="govSetComplexity('${t}',this.value)" style="width:56px;text-align:center;padding:4px;border:1px solid #E2E8F0;border-radius:6px;margin-top:3px"><div style="font-size:9px;color:#94A3B8;margin-top:2px">man-days</div></div>`).join('');
+  const kpi = (l, v, c) => `<div style="background:#fff;border:1px solid #EEF1F6;border-radius:12px;padding:14px 16px;flex:1;min-width:130px"><div style="font-size:10.5px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:.5px">${l}</div><div style="font-size:22px;font-weight:800;color:${c || '#0F2544'};margin-top:5px">${v}</div></div>`;
+  const stC = { Raised: ['#FEF3C7', '#B45309'], Assessing: ['#DBEAFE', '#1D4ED8'], Approved: ['#DCFCE7', '#15803D'], Rejected: ['#F1F5F9', '#94A3B8'], Implemented: ['#E0E7FF', '#4338CA'], Open: ['#FEE2E2', '#B91C1C'], Mitigating: ['#FEF3C7', '#B45309'], Closed: ['#DCFCE7', '#15803D'] };
+  const badge = (t, bg, fg) => `<span style="background:${bg};color:${fg};font-size:10px;font-weight:700;border-radius:8px;padding:2px 8px">${t}</span>`;
+  const del = fn => `<button onclick="${fn}" title="Remove" style="border:none;background:none;color:#CBD5E1;cursor:pointer;font-size:15px" onmouseover="this.style.color='#DC2626'" onmouseout="this.style.color='#CBD5E1'">×</button>`;
+  const crRows = governance.crs.length ? governance.crs.map(c => { const st = stC[c.status] || ['#F1F5F9', '#64748B']; return `<tr><td onclick="govCRopen(${c.id})" style="cursor:pointer;font-weight:600">${c.ref || ''}</td><td onclick="govCRopen(${c.id})" style="cursor:pointer">${c.title}</td><td style="color:#64748B">${c.area || '—'}</td><td style="text-align:center">${c.complexity}</td><td style="text-align:right;font-weight:600">${fmt(govCrMd(c))}</td><td>${badge(c.status, st[0], st[1])}</td><td style="color:#64748B">${c.owner || '—'}</td><td style="text-align:center">${del('govCRdel(' + c.id + ')')}</td></tr>`; }).join('') : `<tr><td colspan="8" style="text-align:center;color:#94A3B8;padding:14px">No change requests yet — <strong>+ New CR</strong>.</td></tr>`;
+  const riskRows = governance.risks.length ? governance.risks.map(r => { const rag = govRag(r.prob, r.impact); const st = stC[r.status] || ['#F1F5F9', '#64748B']; return `<tr><td onclick="govRiskOpen(${r.id})" style="cursor:pointer;font-weight:600">${r.ref || ''}</td><td onclick="govRiskOpen(${r.id})" style="cursor:pointer">${r.title}${r.impacted ? `<div style="font-size:10px;color:#94A3B8">impacts: ${r.impacted}</div>` : ''}</td><td>${r.type}</td><td style="color:#64748B">${r.phase || '—'}</td><td style="text-align:center">${r.prob}×${r.impact}</td><td>${badge(rag, rag === 'Red' ? '#FEE2E2' : rag === 'Amber' ? '#FEF3C7' : '#DCFCE7', GOV_RAGC[rag])}</td><td>${badge(r.status, st[0], st[1])}</td><td style="color:#64748B">${r.owner || '—'}</td><td style="text-align:center">${del('govRiskDel(' + r.id + ')')}</td></tr>`; }).join('') : `<tr><td colspan="9" style="text-align:center;color:#94A3B8;padding:14px">No risks or issues yet — <strong>+ New</strong>.</td></tr>`;
+  el.innerHTML = `
+    <div style="font-size:20px;font-weight:800;color:#0F2544;margin-bottom:4px">Governance</div>
+    <div style="font-size:12px;color:#64748B;margin-bottom:16px">Change Requests &amp; Risks / Issues · Genesis</div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+      ${kpi('Open CRs', openCRs.length)}
+      ${kpi('CR effort', fmt(crEffort) + ' MD', '#0F766E')}
+      ${kpi('Open risks / issues', openRisks.length)}
+      ${kpi('Red risks', redRisks.length, redRisks.length ? '#DC2626' : '#16A34A')}
+    </div>
+    <div class="res-card" style="border-radius:12px"><div class="res-card-title">Complexity matrix <span class="res-hint">Genesis-only · man-days per CR complexity (drives the estimate)</span></div>
+      <div style="display:flex;gap:22px;flex-wrap:wrap;padding:4px 2px">${matrix}</div></div>
+    <div class="res-card" style="border-radius:12px"><div class="res-card-title">Change Requests<button onclick="govCRopen(0)" style="float:right;background:#0F2544;color:#fff;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-weight:600;font-size:11px">＋ New CR</button></div>
+      <table class="dtable"><thead><tr><th>Ref</th><th>Title</th><th>Area</th><th style="text-align:center">Cx</th><th style="text-align:right">Est MD</th><th>Status</th><th>Owner</th><th></th></tr></thead><tbody>${crRows}</tbody></table></div>
+    <div class="res-card" style="border-radius:12px"><div class="res-card-title">Risks &amp; Issues<button onclick="govRiskOpen(0)" style="float:right;background:#0F2544;color:#fff;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-weight:600;font-size:11px">＋ New</button></div>
+      <table class="dtable"><thead><tr><th>Ref</th><th>Title</th><th>Type</th><th>Phase</th><th style="text-align:center">P×I</th><th>RAG</th><th>Status</th><th>Owner</th><th></th></tr></thead><tbody>${riskRows}</tbody></table></div>`;
+}
+
 function applyInternalMode() {
   const genesis = isGenesis();
   // AAR portfolio chrome (Planned/Actual toggle, Stream/Status/Squad filters, project search, stats strip) — not relevant to Genesis
@@ -5400,12 +5503,14 @@ function applyInternalMode() {
   const rm = document.getElementById('tabRoadmap');
   const sc = document.getElementById('tabScope');
   const rp = document.getElementById('tabReport');
+  const gv = document.getElementById('tabGovernance');
   if (d) d.style.display = (genesis || internalMode) ? '' : 'none';   // Genesis always has a Dashboard landing
   if (s) s.style.display = internalMode ? '' : 'none';
   if (rs) rs.style.display = (internalMode && genesis) ? '' : 'none';
   if (rm) rm.style.display = (internalMode && genesis) ? '' : 'none';
   if (sc) sc.style.display = (internalMode && genesis) ? '' : 'none';
   if (rp) rp.style.display = (internalMode && genesis) ? '' : 'none';
+  if (gv) gv.style.display = (internalMode && genesis) ? '' : 'none';
   const btn = document.getElementById('internalToggle');
   if (btn) {
     btn.textContent  = internalMode ? '🔓 Internal' : '🔒';
@@ -5419,7 +5524,7 @@ function applyInternalMode() {
   const aarViews = ['stream', 'squad', 'status', 'resources', 'levelling', 'sizing'];
   const onHidden = (genesis && aarViews.includes(viewMode))
     || (!internalMode && (viewMode === 'dashboard' || viewMode === 'settings'))
-    || ((viewMode === 'resourcing' || viewMode === 'roadmap' || viewMode === 'scope' || viewMode === 'report') && !(internalMode && genesis));
+    || ((viewMode === 'resourcing' || viewMode === 'roadmap' || viewMode === 'scope' || viewMode === 'report' || viewMode === 'governance') && !(internalMode && genesis));
   if (onHidden) {
     if (genesis) setView('dashboard', document.getElementById('tabDashboard'));
     else { const t = [...document.querySelectorAll('.vtab')].find(x => x.textContent.includes('By Stream')); setView('stream', t); }

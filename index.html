@@ -3733,6 +3733,16 @@ function genSupportSummary() {
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">${kpi('Support headcount', sup.length)}${kpi('Support capacity', fte + ' FTE', '#0F766E')}</div>
     <div class="res-card" style="border-radius:12px;background:#FFFBEB"><div class="res-card-title">Support team</div>${rowsH}</div>`}`;
 }
+/** Program AI adoption — man-day-weighted AI% from Scope, rolled up per release + overall. */
+function genAiStats() {
+  const byRel = {}; let tMd = 0, tAdj = 0;
+  (scope.segments || []).forEach(seg => {
+    const rel = seg.release || '—';
+    (seg.themes || []).forEach(t => { const md = +t.md || 0; const adj = md * (1 - (+seg.ai || 0) / 100); (byRel[rel] = byRel[rel] || { md: 0, adj: 0 }); byRel[rel].md += md; byRel[rel].adj += adj; tMd += md; tAdj += adj; });
+  });
+  const pct = (md, adj) => md > 0 ? Math.round((md - adj) / md * 100) : 0;
+  return { overall: pct(tMd, tAdj), tMd, byRel, pct };
+}
 /** Genesis Dashboard — Resourcing Forecast vs Actual summary + by-Domain pool (no AAR utilisation). */
 function genDashboardHTML() {
   const T = resTotals(); const fmt = n => Math.round(n).toLocaleString();
@@ -3754,6 +3764,7 @@ function genDashboardHTML() {
       ${kpi('Estimate to complete', fmt(etcTot), 'man-days remaining', '#0F2544')}
       ${kpi('Est. at completion', fmt(T.aEl + etcTot), Math.round(T.aEl + etcTot - T.fTot) + ' vs baseline ' + fmt(T.fTot), (T.aEl + etcTot) > T.fTot * 1.02 ? '#B45309' : '#0F766E')}
       ${kpi('Active resources', activeCount, 'of ' + rows.length + ' total', '#0F2544')}
+      ${(() => { const ai = genAiStats(); const bits = Object.keys(ai.byRel).filter(r => ai.byRel[r].md > 0).map(r => `${r.replace(/^R/, '')} ${ai.pct(ai.byRel[r].md, ai.byRel[r].adj)}%`).join(' · '); return kpi('AI adoption', ai.overall + '%', bits ? 'by release: ' + bits : 'set AI % per segment in Scope', '#7C3AED'); })()}
     </div>
     <div class="res-card" style="border-radius:14px"><div class="res-card-title" onclick="genChkToggle('chart')" style="cursor:pointer" title="Minimise / maximise"><span style="color:#94A3B8;margin-right:4px">${genChkCollapsed.has('chart') ? '▸' : '▾'}</span>Forecast vs Actual by month <span class="res-hint">grey = forecast · blue = actual (timesheet upload)</span></div>${genChkCollapsed.has('chart') ? '' : bars}</div>
     ${genDomainPoolPanel()}

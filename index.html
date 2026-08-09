@@ -3572,6 +3572,8 @@ function renderDvC() {
 /** Genesis dashboard: resource pool broken down by Domain (headcount + man-days + monthly headcount), expandable to the people behind each. */
 let genPoolExpanded = new Set();
 function genPoolToggle(enc) { const d = decodeURIComponent(enc); if (genPoolExpanded.has(d)) genPoolExpanded.delete(d); else genPoolExpanded.add(d); renderDashboardView(); }
+let genChkCollapsed = new Set();
+function genChkToggle(id) { if (genChkCollapsed.has(id)) genChkCollapsed.delete(id); else genChkCollapsed.add(id); renderDashboardView(); }
 function genDomainPoolPanel() {
   if (!isGenesis() || !(resourcing.rows || []).length) return '';
   const mk = resMonths(); const nowKey = new Date().toISOString().slice(0, 7);
@@ -3610,9 +3612,10 @@ function genDomainPoolPanel() {
     }
     return main + detail;
   }).join('') || `<tr><td colspan="6" style="text-align:center;color:#94A3B8;padding:16px">No resources match “${resSearch}”.</td></tr>`;
-  return `<div class="res-card"><div class="res-card-title">Genesis resource pool — by Domain <span class="res-hint">click a domain to expand the people behind the forecast &amp; who's on overtime · bars = people working per month</span></div>
-    <table class="dtable"><thead><tr><th>Domain</th><th style="text-align:right">Head</th><th style="text-align:right">Forecast</th><th style="text-align:right">Actual</th><th style="text-align:right">Remaining</th><th style="text-align:right">Headcount / month</th></tr></thead>
-    <tbody>${body}<tr style="border-top:2px solid #E2E8F0;font-weight:700"><td>Total</td><td style="text-align:right">${tot.head}</td><td style="text-align:right">${fmt(tot.fc)}</td><td style="text-align:right">${fmt(tot.ac)}</td><td style="text-align:right">${fmt(tot.rem)}</td><td></td></tr></tbody></table></div>`;
+  const collapsed = genChkCollapsed.has('pool');
+  return `<div class="res-card"><div class="res-card-title" onclick="genChkToggle('pool')" style="cursor:pointer" title="Minimise / maximise"><span style="color:#94A3B8;margin-right:4px">${collapsed ? '▸' : '▾'}</span>Genesis resource pool — by Domain <span class="res-hint">click a domain to expand the people behind the forecast &amp; who's on overtime · bars = people working per month</span></div>
+    ${collapsed ? '' : `<table class="dtable"><thead><tr><th>Domain</th><th style="text-align:right">Head</th><th style="text-align:right">Forecast</th><th style="text-align:right">Actual</th><th style="text-align:right">Remaining</th><th style="text-align:right">Headcount / month</th></tr></thead>
+    <tbody>${body}<tr style="border-top:2px solid #E2E8F0;font-weight:700"><td>Total</td><td style="text-align:right">${tot.head}</td><td style="text-align:right">${fmt(tot.fc)}</td><td style="text-align:right">${fmt(tot.ac)}</td><td style="text-align:right">${fmt(tot.rem)}</td><td></td></tr></tbody></table>`}</div>`;
 }
 /** Genesis Dashboard — domain-level coverage checks: Timeline activity vs resource forecast, by month. */
 function genValidationHTML() {
@@ -3638,17 +3641,18 @@ function genValidationHTML() {
   const noAct = [];   // resource forecast, no timeline activity that month
   Object.keys(rsDom).forEach(dl => { const r = rsDom[dl], t = tlDom[dl]; const miss = [...r.m].filter(k => !(t && t.m.has(k))).sort(); if (miss.length) noAct.push({ dom: r.d, months: miss }); });
   const incomplete = rows.filter(r => !(r.name || '').trim() || !(r.domain || '').trim());
-  const block = (icon, bg, fg, title, hint, items, render) => {
-    const list = items.length ? items.slice(0, 20).map(render).join('') + (items.length > 20 ? `<div style="font-size:11px;color:#94A3B8;padding:5px 0">+ ${items.length - 20} more…</div>` : '') : `<div style="font-size:12px;color:#16A34A;padding:6px 0">None — aligned.</div>`;
-    return `<div class="res-card" style="border-radius:12px;flex:1;min-width:280px"><div class="res-card-title">${icon} ${title} <span style="background:${items.length ? bg : '#DCFCE7'};color:${items.length ? fg : '#15803D'};font-size:11px;font-weight:700;border-radius:9px;padding:1px 8px;margin-left:4px">${items.length}</span><div style="font-size:10px;color:#94A3B8;font-weight:400;margin-top:2px">${hint}</div></div>${list}</div>`;
+  const block = (id, icon, bg, fg, title, hint, items, render) => {
+    const collapsed = genChkCollapsed.has(id);
+    const list = collapsed ? '' : (items.length ? items.slice(0, 20).map(render).join('') + (items.length > 20 ? `<div style="font-size:11px;color:#94A3B8;padding:5px 0">+ ${items.length - 20} more…</div>` : '') : `<div style="font-size:12px;color:#16A34A;padding:6px 0">None — aligned.</div>`);
+    return `<div class="res-card" style="border-radius:12px;flex:1;min-width:280px"><div class="res-card-title" onclick="genChkToggle('${id}')" style="cursor:pointer" title="Minimise / maximise"><span style="color:#94A3B8;margin-right:4px">${collapsed ? '▸' : '▾'}</span>${icon} ${title} <span style="background:${items.length ? bg : '#DCFCE7'};color:${items.length ? fg : '#15803D'};font-size:11px;font-weight:700;border-radius:9px;padding:1px 8px;margin-left:4px">${items.length}</span><div style="font-size:10px;color:#94A3B8;font-weight:400;margin-top:2px">${hint}</div></div>${list}</div>`;
   };
   const domRow = x => `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:4px 0;border-bottom:1px solid #F1F5F9"><span style="font-weight:600">${x.dom}</span><span style="color:#64748B;text-align:right">${fmtMonths(x.months)}</span></div>`;
   return `
-    <div style="font-size:16px;font-weight:800;color:#0F2544;margin:26px 0 10px">Timeline ↔ Resource coverage checks <span style="font-size:11px;font-weight:400;color:#94A3B8">by domain &amp; month</span></div>
+    <div style="font-size:16px;font-weight:800;color:#0F2544;margin:26px 0 10px">Timeline ↔ Resource coverage checks <span style="font-size:11px;font-weight:400;color:#94A3B8">by domain &amp; month · click a card title to minimise</span></div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start">
-      ${block('🗓️', '#FEF3C7', '#B45309', 'Activity planned, no resources', 'Timeline has a bar but the domain has no forecast that month', noRes, domRow)}
-      ${block('🧑‍💼', '#DBEAFE', '#1D4ED8', 'Resources allocated, no activity', 'Domain has forecast but no Timeline bar that month', noAct, domRow)}
-      ${block('⚠️', '#FEE2E2', '#B91C1C', 'Incomplete records (no name / domain)', 'Rows missing a name or a domain', incomplete, r => `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:4px 0;border-bottom:1px solid #F1F5F9"><span style="${(r.name || '').trim() ? '' : 'color:#DC2626'}">${(r.name || '').trim() || 'no name'}</span><span style="color:${(r.domain || '').trim() ? '#64748B' : '#DC2626'}">${(r.domain || '').trim() || 'no domain'}</span></div>`)}
+      ${block('noRes', '🗓️', '#FEF3C7', '#B45309', 'Activity planned, no resources', 'Timeline has a bar but the domain has no forecast that month', noRes, domRow)}
+      ${block('noAct', '🧑‍💼', '#DBEAFE', '#1D4ED8', 'Resources allocated, no activity', 'Domain has forecast but no Timeline bar that month', noAct, domRow)}
+      ${block('incomplete', '⚠️', '#FEE2E2', '#B91C1C', 'Incomplete records (no name / domain)', 'Rows missing a name or a domain', incomplete, r => `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:4px 0;border-bottom:1px solid #F1F5F9"><span style="${(r.name || '').trim() ? '' : 'color:#DC2626'}">${(r.name || '').trim() || 'no name'}</span><span style="color:${(r.domain || '').trim() ? '#64748B' : '#DC2626'}">${(r.domain || '').trim() || 'no domain'}</span></div>`)}
     </div>
     <div style="font-size:10px;color:#94A3B8;margin-top:8px">Timeline lanes are matched to resource domains by the lane's Domain (set it in the sub-lane editor), or by an exact lane-name match.</div>`;
 }
@@ -3674,7 +3678,7 @@ function genDashboardHTML() {
       ${kpi('Est. at completion', fmt(T.aEl + etcTot), Math.round(T.aEl + etcTot - T.fTot) + ' vs baseline ' + fmt(T.fTot), (T.aEl + etcTot) > T.fTot * 1.02 ? '#B45309' : '#0F766E')}
       ${kpi('Active resources', activeCount, 'of ' + rows.length + ' total', '#0F2544')}
     </div>
-    <div class="res-card" style="border-radius:14px"><div class="res-card-title">Forecast vs Actual by month <span class="res-hint">grey = forecast · blue = actual (timesheet upload)</span></div>${bars}</div>
+    <div class="res-card" style="border-radius:14px"><div class="res-card-title" onclick="genChkToggle('chart')" style="cursor:pointer" title="Minimise / maximise"><span style="color:#94A3B8;margin-right:4px">${genChkCollapsed.has('chart') ? '▸' : '▾'}</span>Forecast vs Actual by month <span class="res-hint">grey = forecast · blue = actual (timesheet upload)</span></div>${genChkCollapsed.has('chart') ? '' : bars}</div>
     ${genDomainPoolPanel()}
     ${genValidationHTML()}`;
 }
@@ -4421,6 +4425,7 @@ function renderResourcingView() {
         <input id="resSearchInput" value="${resSearch.replace(/"/g, '&quot;')}" oninput="resFilterRows(this.value)" placeholder="🔍 Search name…" style="padding:6px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:12px;min-width:150px">
         <button class="btn btn-ghost btn-sm" onclick="resImport('forecast')" style="font-size:11px">⬆ Import forecast</button>
         <button class="btn btn-ghost btn-sm" onclick="resImport('actual')" style="font-size:11px">⬆ Import actuals</button>
+        <button class="btn btn-ghost btn-sm" onclick="resExportAll()" style="font-size:11px">⬇ Export (all)</button>
         <button class="btn btn-ghost btn-sm" onclick="resOpenDetail(-1)" style="font-size:11px">＋ Add resource</button>
         <button class="btn btn-ghost btn-sm" onclick="resToggleGrid()" style="font-size:11px">${resGrid ? '▤ List view' : '▦ Weekly grid'}</button>
       </div>
@@ -4610,6 +4615,33 @@ function resImport(mode) {
     });
   };
   inp.click();
+}
+/** Export everything to one workbook: Summary (FC/Act/ETC/OT) + Forecast + Actual month sheets. */
+function resExportAll() {
+  const rows = resourcing.rows || [];
+  if (!rows.length) { alert('No resources to export.'); return; }
+  ensureXlsx(() => {
+    const mk = resMonths(); const nowKey = new Date().toISOString().slice(0, 7);
+    const wb = XLSX.utils.book_new();
+    const sum = [['#', 'Person Name', 'SOW Role', 'Domain', 'Location', 'Release', 'Status', 'Forecast MD', 'Actual MD', 'ETC MD', 'OT MD']];
+    rows.forEach((r, i) => {
+      let fc = 0, ac = 0, ot = 0, fcEl = 0;
+      mk.forEach(mo => { if (resFcInMonth(r, mo.key)) { const f = +((r.forecast || {})[mo.key] || 0); fc += f; if (mo.key <= nowKey) fcEl += f; } if (resAcInMonth(r, mo.key)) { ac += +((r.actual || {})[mo.key] || 0); ot += +((r.overtime || {})[mo.key] || 0); } });
+      const etc = r.etc != null ? r.etc : Math.max(0, fc - fcEl);
+      sum.push([i + 1, r.name || '', r.role || '', r.domain || '', r.location || '', r.release || '', r.active === false ? 'Inactive' : 'Active', +fc.toFixed(2), +ac.toFixed(2), +etc.toFixed(2), +ot.toFixed(2)]);
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sum), 'Summary');
+    // Weekly sheets (W/C Monday, hours) — explicit weekly entry where set, else the month split evenly across its weeks
+    const WK = resWeeks(); const byMo = {}; WK.forEach(w => { (byMo[w.monthKey] = byMo[w.monthKey] || []).push(w); });
+    const wkHeaders = WK.map(w => new Date(w.key + 'T00:00:00Z'));   // Date cells → re-importable as weekly hours
+    const weeklyHours = (r, field) => { const wf = field === 'actual' ? 'actualWk' : 'forecastWk'; const out = {}; Object.keys(byMo).forEach(k => { const md = +((r[field] || {})[k] || 0); const arr = md > 0 ? resSplitMonth(md * 7.5, byMo[k].length) : null; byMo[k].forEach((w, ix) => { const ex = (r[wf] || {})[w.key]; out[w.key] = ex != null ? ex : (arr ? arr[ix] : 0); }); }); return out; };
+    ['forecast', 'actual'].forEach(field => {
+      const aoa = [['#', 'Person Name', 'SOW Role', 'Domain', 'Location', 'Release', 'Status', ...wkHeaders, 'Total hrs']];
+      rows.forEach((r, i) => { const wh = weeklyHours(r, field); let tot = 0; const cells = WK.map(w => { const v = +(wh[w.key] || 0); tot += v; return v ? +v.toFixed(2) : ''; }); aoa.push([i + 1, r.name || '', r.role || '', r.domain || '', r.location || '', r.release || '', r.active === false ? 'Inactive' : 'Active', ...cells, +tot.toFixed(2)]); });
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), field === 'actual' ? 'Actual (weekly hrs)' : 'Forecast (weekly hrs)');
+    });
+    XLSX.writeFile(wb, `${ORG}_resourcing_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  });
 }
 function _resMapImport(arr, mode) {
   if (!arr || !arr.length) { alert('That sheet looks empty.'); return; }

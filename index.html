@@ -3339,6 +3339,7 @@ function persistRoadmap() { localStorage.setItem(KP + 'roadmap', JSON.stringify(
 // ── Stage 3: Scope (Genesis) — Release → Segment → Theme totals ──
 let scope = JSON.parse(localStorage.getItem(KP + 'scope') || 'null') || null;
 if (!scope || !Array.isArray(scope.segments)) scope = { segments: [] };
+if (!scope.domainMap || typeof scope.domainMap !== 'object') scope.domainMap = {};
 function persistScope() { localStorage.setItem(KP + 'scope', JSON.stringify(scope)); pushCloud(); }
 let workOrders = JSON.parse(localStorage.getItem(KP + 'wos') || 'null') || (ORG === 'AAR' ? WO_DEFAULTS.map(w => ({ ...w, projects:[...w.projects] })) : []);
 workOrders.forEach(w => { if (!Array.isArray(w.projects)) w.projects = []; if (w.ba == null) w.ba = 0; });
@@ -5038,7 +5039,12 @@ function scReleases() { const set = new Set(['R2.0', 'R2.1', 'R2.2']); (scope.se
 function scSegs() { return (scope.segments || []).filter(s => s.release === scRel); }
 function scFindSeg(id) { return scope.segments.find(s => s.id === id); }
 function scThemeAdj(seg, t) { return (+t.md || 0) * (1 - (+seg.ai || 0) / 100); }
-function scSegTotals(seg) { let stories = 0, md = 0, adj = 0, wp = 0, w = 0; (seg.themes || []).forEach(t => { const m = +t.md || 0; stories += (+t.stories || 0); md += m; adj += scThemeAdj(seg, t); wp += m * (+t.pct || 0); w += m; }); return { stories, md, adj, pct: w ? Math.round(wp / w) : 0 }; }
+function scSegTotals(seg) {
+  let stories = 0, md = 0, adj = 0, wpMd = 0, wMd = 0, wpSt = 0, wSt = 0, sumP = 0, n = 0;
+  (seg.themes || []).forEach(t => { const m = +t.md || 0, st = +t.stories || 0, p = +t.pct || 0; stories += st; md += m; adj += scThemeAdj(seg, t); wpMd += m * p; wMd += m; wpSt += st * p; wSt += st; sumP += p; n++; });
+  const pct = wMd > 0 ? Math.round(wpMd / wMd) : wSt > 0 ? Math.round(wpSt / wSt) : n ? Math.round(sumP / n) : 0;   // weight by man-days, else stories, else simple average
+  return { stories, md, adj, pct };
+}
 function scSetRel(r) { scRel = r; scRender(); }
 function scToggleSeg(id) { if (scCollapsed.has(id)) scCollapsed.delete(id); else scCollapsed.add(id); scRender(); }
 function scSetAi(id, val) { const s = scFindSeg(id); if (!s) return; s.ai = Math.max(0, Math.min(100, +val || 0)); persistScope(); scRender(); }
@@ -5049,6 +5055,9 @@ function scAddTheme(segId) { const s = scFindSeg(segId); if (!s) return; uiModal
 function scEditTheme(segId, tid) { const s = scFindSeg(segId); const t = s && s.themes.find(x => x.id === tid); if (!t) return; uiModal('Edit theme', [{ id: 'name', label: 'Theme name', value: t.name }, { id: 'story', label: 'Scope note', value: t.story || '' }, { id: 'stories', label: 'User stories (volume)', type: 'number', value: String(+t.stories || 0) }, { id: 'md', label: 'Baseline man-days', type: 'number', value: String(+t.md || 0) }, { id: 'pct', label: '% complete', type: 'number', value: String(+t.pct || 0) }], 'Save', v => { t.name = v.name.trim(); t.story = (v.story || '').trim(); t.stories = +v.stories || 0; t.md = +v.md || 0; t.pct = Math.max(0, Math.min(100, +v.pct || 0)); persistScope(); scRender(); }); }
 function scDelTheme(segId, tid) { const s = scFindSeg(segId); if (!s) return; s.themes = s.themes.filter(t => t.id !== tid); persistScope(); scRender(); }
 function scAddTesting() { const areas = ['ST', 'SIT', 'BVT', 'Regression', 'UAT', 'PT']; scope.segments.push({ id: rmId(), release: scRel, name: 'Testing', ai: 0, themes: areas.map(a => ({ id: rmId(), name: a, story: '', stories: 0, md: 0, pct: 0 })) }); persistScope(); scRender(); }
+function scMapAdd(encName, domain) { if (!domain) return; const nm = decodeURIComponent(encName); scope.domainMap = scope.domainMap || {}; scope.domainMap[nm] = scope.domainMap[nm] || []; if (!scope.domainMap[nm].includes(domain)) scope.domainMap[nm].push(domain); persistScope(); scRender(); }
+function scMapRemove(encName, encDom) { const nm = decodeURIComponent(encName), dom = decodeURIComponent(encDom); scope.domainMap = scope.domainMap || {}; scope.domainMap[nm] = (scope.domainMap[nm] || []).filter(d => d !== dom); persistScope(); scRender(); }
+function scDomsMD(doms) { const set = new Set((doms || []).map(d => d.toLowerCase())); const mk = resMonths(); let fc = 0, ac = 0; (resourcing.rows || []).forEach(r => { if (!set.has(String(r.domain || '').trim().toLowerCase())) return; mk.forEach(mo => { if (resFcInMonth(r, mo.key)) fc += +((r.forecast || {})[mo.key] || 0); if (resAcInMonth(r, mo.key)) ac += +((r.actual || {})[mo.key] || 0); }); }); return { fc, ac }; }
 function scCopyOpen() {
   if (!scSegs().length) { alert('Nothing to copy in ' + scRel + '.'); return; }
   const rels = scReleases().filter(r => r !== scRel);
@@ -5074,9 +5083,9 @@ function scRender() {
   if (!scRel || !rels.includes(scRel)) scRel = rels.includes('R2.2') ? 'R2.2' : rels[0];
   const fmt = n => Math.round(n).toLocaleString();
   const segs = scSegs();
-  let tStories = 0, tMd = 0, tAdj = 0, twp = 0, tw = 0;
-  segs.forEach(seg => { const st = scSegTotals(seg); tStories += st.stories; tMd += st.md; tAdj += st.adj; twp += st.md * st.pct; tw += st.md; });
-  const tPct = tw ? Math.round(twp / tw) : 0;
+  let tStories = 0, tMd = 0, tAdj = 0, wpMd = 0, wMd = 0, wpSt = 0, wSt = 0, sumP = 0, nSeg = 0;
+  segs.forEach(seg => { const st = scSegTotals(seg); tStories += st.stories; tMd += st.md; tAdj += st.adj; wpMd += st.md * st.pct; wMd += st.md; wpSt += st.stories * st.pct; wSt += st.stories; sumP += st.pct; nSeg++; });
+  const tPct = wMd > 0 ? Math.round(wpMd / wMd) : wSt > 0 ? Math.round(wpSt / wSt) : nSeg ? Math.round(sumP / nSeg) : 0;
   const relOpts = rels.map(r => `<option value="${r}" ${r === scRel ? 'selected' : ''}>${r}</option>`).join('');
   const kpi = (l, v, c) => `<div style="background:#fff;border:1px solid #EEF1F6;border-radius:12px;padding:14px 16px;flex:1;min-width:120px"><div style="font-size:10.5px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:.5px">${l}</div><div style="font-size:22px;font-weight:800;color:${c || '#0F2544'};margin-top:5px">${v}</div></div>`;
   const hdr = `<div style="display:flex;background:#F8FAFC;color:#64748B;font-size:11px;font-weight:700;padding:7px 10px;border-bottom:1px solid #E2E8F0"><div style="flex:2.6">Segment · Theme</div><div style="flex:.8;text-align:right">Stories</div><div style="flex:.9;text-align:right">Baseline</div><div style="flex:.8;text-align:right">AI %</div><div style="flex:.9;text-align:right">AI-adj</div><div style="flex:1.5;text-align:right">% complete</div><div style="width:44px"></div></div>`;
@@ -5110,6 +5119,18 @@ function scRender() {
   });
   const totalRow = `<div style="display:flex;align-items:center;padding:8px 10px;background:#F8FAFC;font-weight:800;color:#0F2544"><div style="flex:2.6">Release total</div><div style="flex:.8;text-align:right">${tStories}</div><div style="flex:.9;text-align:right">${fmt(tMd)}</div><div style="flex:.8"></div><div style="flex:.9;text-align:right">${fmt(tAdj)}</div><div style="flex:1.5;text-align:right">${tPct}%</div><div style="width:44px"></div></div>`;
   const empty = !segs.length ? `<div style="text-align:center;color:#94A3B8;padding:36px">No scope for ${scRel} yet. <button onclick="scAddSegment()" style="background:#0F2544;color:#fff;border:none;padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:600;margin-left:6px">+ Add segment</button></div>` : '';
+  const allDoms = [...new Set((resourcing.rows || []).map(r => (r.domain || '').trim()).filter(Boolean))].sort();
+  const segNames = [...new Set(segs.map(s => s.name))];
+  const mapRows = segNames.map(nm => {
+    const mapped = (scope.domainMap || {})[nm] || [];
+    const chips = mapped.length ? mapped.map(d => `<span style="display:inline-flex;align-items:center;gap:3px;background:#EFF6FF;color:#1D4ED8;font-size:10px;border-radius:9px;padding:1px 4px 1px 7px;margin:1px">${d}<span onclick="scMapRemove('${encodeURIComponent(nm)}','${encodeURIComponent(d)}')" style="cursor:pointer;color:#60A5FA;font-weight:700">×</span></span>`).join('') : '<span style="color:#CBD5E1;font-size:11px">— none —</span>';
+    const avail = allDoms.filter(d => !mapped.includes(d));
+    const sel = avail.length ? `<select onchange="scMapAdd('${encodeURIComponent(nm)}',this.value);this.value=''" style="font-size:10px;border:1px solid #E2E8F0;border-radius:6px;padding:2px 4px;margin-left:4px"><option value="">+ domain</option>${avail.map(d => `<option value="${d.replace(/"/g, '&quot;')}">${d}</option>`).join('')}</select>` : '';
+    const md = scDomsMD(mapped);
+    return `<tr><td style="font-weight:600">${nm}</td><td>${chips}${sel}</td><td style="text-align:right">${fmt(md.fc)}</td><td style="text-align:right;font-weight:600">${fmt(md.ac)}</td></tr>`;
+  }).join('');
+  const mapPanel = segNames.length ? `<div class="res-card" style="margin-top:16px;border-radius:12px"><div class="res-card-title">Segment ↔ Resource domain mapping <span class="res-hint">link each scope segment to its resourcing domain(s) — pulls forecast/actual man-days from Resources</span></div>
+    <table class="dtable"><thead><tr><th>Scope segment</th><th>Resource domain(s)</th><th style="text-align:right">Resource FC MD</th><th style="text-align:right">Resource Act MD</th></tr></thead><tbody>${mapRows}</tbody></table></div>` : '';
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px">
       <div style="display:flex;align-items:center;gap:10px"><div style="font-size:20px;font-weight:800;color:#0F2544">Scope — Release</div><select onchange="scSetRel(this.value)" style="padding:6px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:14px;font-weight:600">${relOpts}</select></div>
@@ -5124,7 +5145,8 @@ function scRender() {
     </div>
     ${empty}
     <div style="border:1px solid #E2E8F0;border-radius:12px;overflow:hidden">${hdr}${rows}${segs.length ? totalRow : ''}</div>
-    <div style="font-size:10px;color:#94A3B8;margin-top:10px">Click a segment or theme to edit · AI % is set per segment and adjusts its themes · % complete rolls up weighted by man-days.</div>`;
+    ${mapPanel}
+    <div style="font-size:10px;color:#94A3B8;margin-top:10px">Click a segment or theme to edit · AI % is set per segment and adjusts its themes · % complete rolls up weighted by man-days (or story count when man-days are 0).</div>`;
 }
 
 function applyInternalMode() {

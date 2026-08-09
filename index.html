@@ -2405,6 +2405,7 @@ function applyCloudData(data) {
     if (data.scope && Array.isArray(data.scope.segments)) {
       scope = data.scope;
       if (!scope.domainMap) scope.domainMap = {}; if (!scope.resourcePlan) scope.resourcePlan = {};
+      if (!Array.isArray(scope.gaps)) scope.gaps = [];
       localStorage.setItem(KP + 'scope', JSON.stringify(scope));
     }
     if (data.governance && typeof data.governance === 'object') {
@@ -3381,6 +3382,7 @@ let scope = JSON.parse(localStorage.getItem(KP + 'scope') || 'null') || null;
 if (!scope || !Array.isArray(scope.segments)) scope = { segments: [] };
 if (!scope.domainMap || typeof scope.domainMap !== 'object') scope.domainMap = {};
 if (!scope.resourcePlan || typeof scope.resourcePlan !== 'object') scope.resourcePlan = {};
+if (!Array.isArray(scope.gaps)) scope.gaps = [];
 function persistScope() { localStorage.setItem(KP + 'scope', JSON.stringify(scope)); pushCloud(); }
 // ── Stage 4: Governance (Genesis) — Change Requests + Risks & Issues, with a Genesis-only complexity matrix ──
 let governance = JSON.parse(localStorage.getItem(KP + 'governance') || 'null') || null;
@@ -5377,6 +5379,27 @@ function scRender() {
   }).join('');
   const mapPanel = segNames.length ? `<div class="res-card" style="margin-top:16px;border-radius:12px"><div class="res-card-title">Segment ↔ Resource domain mapping <span class="res-hint">link each scope segment to its resourcing domain(s) — pulls forecast/actual man-days from Resources</span></div>
     <table class="dtable"><thead><tr><th>Scope segment</th><th>Resource domain(s)</th><th style="text-align:right">Resource FC MD</th><th style="text-align:right">Resource Act MD</th></tr></thead><tbody>${mapRows}</tbody></table></div>` : '';
+  // ── Product Gap register ──
+  const gaps = scope.gaps || [];
+  const gapRows = gaps.length ? gaps.map(g => {
+    const age = scGapAging(g); const delivered = g.delivery && new Date(g.delivery) <= new Date();
+    const ageCol = age == null ? '#94A3B8' : delivered ? '#0F766E' : age > 60 ? '#DC2626' : age > 30 ? '#B45309' : '#0F2544';
+    return `<tr><td onclick="scGapOpen(${g.id})" style="cursor:pointer;font-weight:600;color:#0F2544;white-space:nowrap">${g.prsd || '—'}</td>
+      <td><span style="background:#EEF2FF;color:#4338CA;font-size:10px;font-weight:700;border-radius:8px;padding:2px 7px">${g.release || 'Other'}</span></td>
+      <td style="max-width:300px">${g.desc || ''}</td>
+      <td style="white-space:nowrap;color:#334155">${g.owner || ''}</td>
+      <td style="white-space:nowrap">${scFmtD(g.raised)}</td>
+      <td style="white-space:nowrap">${scFmtD(g.delivery)}</td>
+      <td style="text-align:right;font-weight:700;color:${ageCol};white-space:nowrap">${age == null ? '—' : age + 'd' + (delivered ? ' ✓' : '')}</td>
+      <td style="color:#64748B;max-width:240px">${g.notes || ''}</td>
+      <td style="text-align:center"><button onclick="scGapDel(${g.id})" title="Delete" style="background:none;border:none;color:#B91C1C;cursor:pointer;font-size:13px">✕</button></td></tr>`;
+  }).join('') : `<tr><td colspan="9" style="text-align:center;color:#94A3B8;padding:20px">No product gaps logged. Use <b>＋ Product Gap</b> to add one.</td></tr>`;
+  const gapOpen = gaps.filter(g => !(g.delivery && new Date(g.delivery) <= new Date())).length;
+  const gapPanel = `<div class="res-card" style="margin-top:16px;border-radius:12px;border:1px solid #E2E8F0">
+    <div class="res-card-title" onclick="scToggleGap()" style="cursor:pointer">${scGapChevron()}Product Gap register
+      <span class="res-hint">PRSD tracking · ${gaps.length} logged · ${gapOpen} open</span>
+      <span style="float:right"><button onclick="event.stopPropagation();scGapOpen(0)" style="background:#0F2544;color:#fff;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-weight:600;font-size:11px">＋ Product Gap</button></span></div>${scGapCollapsed ? '' : `
+    <table class="dtable"><thead><tr><th>PRSD #</th><th>Release</th><th>Description</th><th>Owner</th><th>Date raised</th><th>Delivery date</th><th style="text-align:right">Aging</th><th>Notes</th><th style="width:40px"></th></tr></thead><tbody>${gapRows}</tbody></table>`}</div>`;
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px">
       <div style="display:flex;align-items:center;gap:10px"><div style="font-size:20px;font-weight:800;color:#0F2544">Scope — Release</div><select onchange="scSetRel(this.value)" style="padding:6px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:14px;font-weight:600">${relOpts}</select></div>
@@ -5392,8 +5415,33 @@ function scRender() {
     ${empty}
     <div style="border:1px solid #E2E8F0;border-radius:12px;overflow:hidden">${hdr}${rows}${segs.length ? totalRow : ''}</div>
     ${mapPanel}
+    ${gapPanel}
     <div style="font-size:10px;color:#94A3B8;margin-top:10px">Baseline man-days flow from the mapped resource domains (see mapping below) · AI % is set per segment and adjusts its baseline · % complete rolls up weighted by baseline (or story count when 0).</div>`;
 }
+// ── Product Gap register (PRSD tracking) ──
+let scGapCollapsed = false;
+function scToggleGap() { scGapCollapsed = !scGapCollapsed; scRender(); }
+function scGapChevron() { return `<span style="color:#94A3B8;margin-right:6px">${scGapCollapsed ? '▸' : '▾'}</span>`; }
+function scFmtD(d) { if (!d) return '—'; const dt = new Date(d); if (isNaN(dt)) return d; return dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }); }
+function scGapAging(g) { if (!g.raised) return null; const raised = new Date(g.raised); if (isNaN(raised)) return null; const today = new Date(); const deliv = g.delivery ? new Date(g.delivery) : null; const end = (deliv && !isNaN(deliv) && deliv <= today) ? deliv : today; return Math.max(0, Math.round((end - raised) / 86400000)); }
+function scGapOpen(id) {
+  const g = id ? (scope.gaps || []).find(x => x.id === id) : null;
+  uiModal(id ? 'Edit product gap' : 'New product gap', [
+    { id: 'prsd', label: 'PRSD #', value: (g && g.prsd) || '', placeholder: 'e.g. PRSD-1042' },
+    { id: 'release', label: 'Release', type: 'select', value: (g && g.release) || 'R2.1', options: [['R2.1', 'R2.1'], ['R2.2', 'R2.2'], ['Other', 'Other']] },
+    { id: 'desc', label: 'Description', value: (g && g.desc) || '' },
+    { id: 'owner', label: 'Owner', value: (g && g.owner) || '', placeholder: 'e.g. Product / name' },
+    { id: 'raised', label: 'Date raised', type: 'date', value: (g && g.raised) || '' },
+    { id: 'delivery', label: 'Delivery date', type: 'date', value: (g && g.delivery) || '' },
+    { id: 'notes', label: 'Notes', value: (g && g.notes) || '' }
+  ], 'Save', v => {
+    scope.gaps = scope.gaps || [];
+    if (g) { Object.assign(g, { prsd: v.prsd.trim(), release: v.release, desc: v.desc.trim(), owner: v.owner.trim(), raised: v.raised, delivery: v.delivery, notes: v.notes.trim() }); }
+    else scope.gaps.push({ id: rmId(), prsd: v.prsd.trim(), release: v.release, desc: v.desc.trim(), owner: v.owner.trim(), raised: v.raised, delivery: v.delivery, notes: v.notes.trim() });
+    persistScope(); scRender();
+  });
+}
+function scGapDel(id) { uiConfirm('Delete product gap', 'Remove this PRSD entry?', () => { scope.gaps = (scope.gaps || []).filter(x => x.id !== id); persistScope(); scRender(); }); }
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Genesis Management Report — in-app view, Print/PDF, and email-ready HTML

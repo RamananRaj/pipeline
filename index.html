@@ -3614,29 +3614,43 @@ function genDomainPoolPanel() {
     <table class="dtable"><thead><tr><th>Domain</th><th style="text-align:right">Head</th><th style="text-align:right">Forecast</th><th style="text-align:right">Actual</th><th style="text-align:right">Remaining</th><th style="text-align:right">Headcount / month</th></tr></thead>
     <tbody>${body}<tr style="border-top:2px solid #E2E8F0;font-weight:700"><td>Total</td><td style="text-align:right">${tot.head}</td><td style="text-align:right">${fmt(tot.fc)}</td><td style="text-align:right">${fmt(tot.ac)}</td><td style="text-align:right">${fmt(tot.rem)}</td><td></td></tr></tbody></table></div>`;
 }
-/** Genesis Dashboard — coverage checks tying the Timeline to Resources. */
+/** Genesis Dashboard — domain-level coverage checks: Timeline activity vs resource forecast, by month. */
 function genValidationHTML() {
   if (!isGenesis()) return '';
   const rows = resourcing.rows || [], mk = resMonths();
-  const df = iso => { try { return rmFmtShort(iso); } catch (e) { return iso; } };
-  const noRes = [];
+  const monthLabel = k => { const mo = mk.find(m => m.key === k); return mo ? mo.label : k; };
+  const fmtMonths = arr => arr.map(monthLabel).join(', ');
+  const resDomSet = new Set(rows.map(r => (r.domain || '').trim().toLowerCase()).filter(Boolean));
+  // Timeline: domain → months that have a bar (lane domain, or lane name if it matches a resource domain)
+  const tlDom = {};
   (roadmap.sections || []).forEach(s => (s.groups || []).forEach(g => (g.lanes || []).forEach(ln => {
-    const dom = (ln.domain || ln.name || '').trim();
-    (ln.bars || []).forEach(b => { if (!b.start || !b.end) return; const eff = rmEffort(dom, b.start, b.end); if (eff.fc === 0) noRes.push({ label: (s.name || 'Track') + ' › ' + (ln.name || 'Lane') + ' — ' + (b.label || 'bar'), dom: dom || '(no domain set)', dates: df(b.start) + ' → ' + df(b.end) }); });
+    let dom = (ln.domain || '').trim();
+    if (!dom && resDomSet.has((ln.name || '').trim().toLowerCase())) dom = (ln.name || '').trim();
+    if (!dom) return;
+    const dl = dom.toLowerCase();
+    (ln.bars || []).forEach(b => { if (!b.start || !b.end) return; mk.forEach(mo => { if (mo.key >= b.start.slice(0, 7) && mo.key <= b.end.slice(0, 7)) (tlDom[dl] = tlDom[dl] || { d: dom, m: new Set() }).m.add(mo.key); }); });
   })));
-  const bench = rows.filter(r => { let fc = 0; mk.forEach(mo => { if (resFcInMonth(r, mo.key)) fc += +((r.forecast || {})[mo.key] || 0); }); return fc <= 0; });
+  // Resources: domain → months with forecast > 0
+  const rsDom = {};
+  rows.forEach(r => { const dom = (r.domain || '').trim(); if (!dom) return; const dl = dom.toLowerCase(); mk.forEach(mo => { if (resFcInMonth(r, mo.key) && (+((r.forecast || {})[mo.key] || 0)) > 0) (rsDom[dl] = rsDom[dl] || { d: dom, m: new Set() }).m.add(mo.key); }); });
+  const noRes = [];   // timeline activity, no resource forecast that month
+  Object.keys(tlDom).forEach(dl => { const t = tlDom[dl], r = rsDom[dl]; const miss = [...t.m].filter(k => !(r && r.m.has(k))).sort(); if (miss.length) noRes.push({ dom: t.d, months: miss }); });
+  const noAct = [];   // resource forecast, no timeline activity that month
+  Object.keys(rsDom).forEach(dl => { const r = rsDom[dl], t = tlDom[dl]; const miss = [...r.m].filter(k => !(t && t.m.has(k))).sort(); if (miss.length) noAct.push({ dom: r.d, months: miss }); });
   const incomplete = rows.filter(r => !(r.name || '').trim() || !(r.domain || '').trim());
-  const block = (icon, bg, fg, title, items, render) => {
-    const list = items.length ? items.slice(0, 20).map(render).join('') + (items.length > 20 ? `<div style="font-size:11px;color:#94A3B8;padding:5px 0">+ ${items.length - 20} more…</div>` : '') : `<div style="font-size:12px;color:#16A34A;padding:6px 0">None — all good.</div>`;
-    return `<div class="res-card" style="border-radius:12px;flex:1;min-width:280px"><div class="res-card-title">${icon} ${title} <span style="background:${items.length ? bg : '#DCFCE7'};color:${items.length ? fg : '#15803D'};font-size:11px;font-weight:700;border-radius:9px;padding:1px 8px;margin-left:4px">${items.length}</span></div>${list}</div>`;
+  const block = (icon, bg, fg, title, hint, items, render) => {
+    const list = items.length ? items.slice(0, 20).map(render).join('') + (items.length > 20 ? `<div style="font-size:11px;color:#94A3B8;padding:5px 0">+ ${items.length - 20} more…</div>` : '') : `<div style="font-size:12px;color:#16A34A;padding:6px 0">None — aligned.</div>`;
+    return `<div class="res-card" style="border-radius:12px;flex:1;min-width:280px"><div class="res-card-title">${icon} ${title} <span style="background:${items.length ? bg : '#DCFCE7'};color:${items.length ? fg : '#15803D'};font-size:11px;font-weight:700;border-radius:9px;padding:1px 8px;margin-left:4px">${items.length}</span><div style="font-size:10px;color:#94A3B8;font-weight:400;margin-top:2px">${hint}</div></div>${list}</div>`;
   };
+  const domRow = x => `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:4px 0;border-bottom:1px solid #F1F5F9"><span style="font-weight:600">${x.dom}</span><span style="color:#64748B;text-align:right">${fmtMonths(x.months)}</span></div>`;
   return `
-    <div style="font-size:16px;font-weight:800;color:#0F2544;margin:26px 0 10px">Timeline ↔ Resource coverage checks</div>
+    <div style="font-size:16px;font-weight:800;color:#0F2544;margin:26px 0 10px">Timeline ↔ Resource coverage checks <span style="font-size:11px;font-weight:400;color:#94A3B8">by domain &amp; month</span></div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start">
-      ${block('🗓️', '#FEF3C7', '#B45309', 'Timeline activity with no resources', noRes, x => `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:4px 0;border-bottom:1px solid #F1F5F9"><span>${x.label} <span style="color:#94A3B8">· ${x.dom}</span></span><span style="color:#64748B;white-space:nowrap">${x.dates}</span></div>`)}
-      ${block('🪑', '#DBEAFE', '#1D4ED8', 'Resources with no work allocated', bench, r => `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:4px 0;border-bottom:1px solid #F1F5F9"><span>${r.name || '—'} <span style="color:#94A3B8">· ${r.role || ''}</span></span><span style="color:#64748B">${r.domain || '—'}</span></div>`)}
-      ${block('⚠️', '#FEE2E2', '#B91C1C', 'Incomplete records (no name / domain)', incomplete, r => `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:4px 0;border-bottom:1px solid #F1F5F9"><span style="${(r.name || '').trim() ? '' : 'color:#DC2626'}">${(r.name || '').trim() || 'no name'}</span><span style="color:${(r.domain || '').trim() ? '#64748B' : '#DC2626'}">${(r.domain || '').trim() || 'no domain'}</span></div>`)}
-    </div>`;
+      ${block('🗓️', '#FEF3C7', '#B45309', 'Activity planned, no resources', 'Timeline has a bar but the domain has no forecast that month', noRes, domRow)}
+      ${block('🧑‍💼', '#DBEAFE', '#1D4ED8', 'Resources allocated, no activity', 'Domain has forecast but no Timeline bar that month', noAct, domRow)}
+      ${block('⚠️', '#FEE2E2', '#B91C1C', 'Incomplete records (no name / domain)', 'Rows missing a name or a domain', incomplete, r => `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:4px 0;border-bottom:1px solid #F1F5F9"><span style="${(r.name || '').trim() ? '' : 'color:#DC2626'}">${(r.name || '').trim() || 'no name'}</span><span style="color:${(r.domain || '').trim() ? '#64748B' : '#DC2626'}">${(r.domain || '').trim() || 'no domain'}</span></div>`)}
+    </div>
+    <div style="font-size:10px;color:#94A3B8;margin-top:8px">Timeline lanes are matched to resource domains by the lane's Domain (set it in the sub-lane editor), or by an exact lane-name match.</div>`;
 }
 /** Genesis Dashboard — Resourcing Forecast vs Actual summary + by-Domain pool (no AAR utilisation). */
 function genDashboardHTML() {

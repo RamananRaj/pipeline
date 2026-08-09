@@ -295,12 +295,12 @@ body.drag-active *{cursor:grabbing!important;user-select:none;}
     <button id="internalToggle" onclick="toggleInternal()" title="Internal views" style="font-size:13px;font-weight:600;color:#94A3B8;background:transparent;border:1px solid #334155;border-radius:5px;padding:4px 9px;cursor:pointer;white-space:nowrap">🔒</button>
     <div class="view-tabs">
       <button class="vtab" id="tabDashboard" onclick="setView('dashboard',this)">📈 Dashboard</button>
-      <button class="vtab active" onclick="setView('stream',this)">By Stream</button>
-      <button class="vtab" onclick="setView('squad',this)">By Squad</button>
-      <button class="vtab" onclick="setView('status',this)">By Status</button>
-      <button class="vtab" onclick="setView('resources',this)">📊 Resources</button>
-      <button class="vtab" onclick="setView('levelling',this)">⚖ Levelling</button>
-      <button class="vtab" onclick="setView('sizing',this)">👕 Sizing</button>
+      <button class="vtab active" id="tabStream" onclick="setView('stream',this)">By Stream</button>
+      <button class="vtab" id="tabSquad" onclick="setView('squad',this)">By Squad</button>
+      <button class="vtab" id="tabStatus" onclick="setView('status',this)">By Status</button>
+      <button class="vtab" id="tabResourcesA" onclick="setView('resources',this)">📊 Resources</button>
+      <button class="vtab" id="tabLevelling" onclick="setView('levelling',this)">⚖ Levelling</button>
+      <button class="vtab" id="tabSizing" onclick="setView('sizing',this)">👕 Sizing</button>
       <button class="vtab" id="tabResourcing" onclick="setView('resourcing',this)" style="display:none">💷 Resourcing</button>
       <button class="vtab" id="tabRoadmap" onclick="setView('roadmap',this)" style="display:none">🗺 Roadmap</button>
       <button class="vtab" id="tabScope" onclick="setView('scope',this)" style="display:none">📋 Scope</button>
@@ -4308,7 +4308,8 @@ function renderResourcingView() {
   const sVal = m => { switch (resSort.key) { case 'role': return (m.r.role || '').toLowerCase(); case 'domain': return (m.r.domain || '').toLowerCase(); case 'release': return (m.r.release || '').toLowerCase(); case 'fc': return m.rf; case 'act': return m.ra; case 'etc': return m.etc; case 'ot': return m.rot; case 'status': return m.active ? 1 : 0; default: return (m.r.name || '').toLowerCase(); } };
   const sdir = resSort.dir === 'desc' ? -1 : 1;
   metrics.sort((a, b) => { const va = sVal(a), vb = sVal(b); if (va < vb) return -sdir; if (va > vb) return sdir; return a.idx - b.idx; });
-  const resList = rows.length ? metrics.slice(0, 300).map(({ r, idx: i, rf, ra, rot, etc }) => {
+  const shown = resSearch ? metrics.filter(m => (m.r.name || '').toLowerCase().includes(resSearch.toLowerCase())) : metrics;
+  let resList = rows.length ? shown.slice(0, 300).map(({ r, idx: i, rf, ra, rot, etc }) => {
     const etcCell = `<span onclick="resEditETC(${i})" title="Click to set a revised Estimate to Complete — blank reverts to remaining forecast" style="cursor:pointer;border-bottom:1px dashed #CBD5E1">${fmt(etc)}${r.etc != null ? '<span style="color:#B45309"> *</span>' : ''}</span>`;
     const otCell = rot > 0 ? `<span title="Logged over 37.5 h/week" style="color:#B45309;font-weight:700">⚑ ${fmt(rot)}</span>` : `<span style="color:#CBD5E1">—</span>`;
     const off = r.active === false;
@@ -4338,13 +4339,15 @@ function renderResourcingView() {
     }
     return mainRow + detail;
   }).join('') : `<tr><td colspan="11" style="text-align:center;color:#94A3B8;padding:18px">No resources yet — <strong>Import forecast</strong> or <strong>Add resource</strong>.</td></tr>`;
+  if (resList === '' && resSearch) resList = `<tr><td colspan="11" style="text-align:center;color:#94A3B8;padding:18px">No resources match “${resSearch}”.</td></tr>`;
 
   const sTh = (label, key, align) => `<th onclick="resSetSort('${key}')" title="Sort by ${label}" style="cursor:pointer;user-select:none;white-space:nowrap;text-align:${align || 'left'}">${label}${resSort.key === key ? `<span style="color:#2563EB"> ${resSort.dir === 'asc' ? '▲' : '▼'}</span>` : '<span style="color:#CBD5E1"> ↕</span>'}</th>`;
   document.getElementById('resourcingView').innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px">
       <div><div style="font-size:20px;font-weight:800;color:#0F2544;letter-spacing:-.01em">Resourcing — Forecast vs Actual</div>
         <div style="font-size:12px;color:#64748B;margin-top:2px">Man-days per resource per month · ${rows.length} resources · ${ORG}</div></div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input id="resSearchInput" value="${resSearch.replace(/"/g, '&quot;')}" oninput="resSetSearch(this.value)" placeholder="🔍 Search name…" style="padding:6px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:12px;min-width:150px">
         <button class="btn btn-ghost btn-sm" onclick="resImport('forecast')" style="font-size:11px">⬆ Import forecast</button>
         <button class="btn btn-ghost btn-sm" onclick="resImport('actual')" style="font-size:11px">⬆ Import actuals</button>
         <button class="btn btn-ghost btn-sm" onclick="resOpenDetail(-1)" style="font-size:11px">＋ Add resource</button>
@@ -4370,6 +4373,8 @@ function renderResourcingView() {
 // ── Weekly grid: resources × weeks, forecast editable + actual row, frozen headers ──
 let resGrid = false;
 function resToggleGrid() { resGrid = !resGrid; renderResourcingView(); }
+let resSearch = '';
+function resSetSearch(v) { resSearch = v; renderResourcingView(); const el = document.getElementById('resSearchInput'); if (el) { el.focus(); const val = el.value; el.value = ''; el.value = val; } }
 let _resGridTimer = null;
 function resGridSet(id, wk, val) {
   const r = (resourcing.rows || []).find(x => x.id === id); if (!r) return;
@@ -4387,8 +4392,10 @@ function resGridSet(id, wk, val) {
   if (seeded) renderResourcingView();
 }
 function resGridHTML() {
-  const rows = resourcing.rows || [];
-  if (!rows.length) return `<div class="res-card" style="border-radius:14px"><div style="text-align:center;color:#94A3B8;padding:24px">No resources yet.</div></div>`;
+  const allRows = resourcing.rows || [];
+  const rows = resSearch ? allRows.filter(r => (r.name || '').toLowerCase().includes(resSearch.toLowerCase())) : allRows;
+  if (!allRows.length) return `<div class="res-card" style="border-radius:14px"><div style="text-align:center;color:#94A3B8;padding:24px">No resources yet.</div></div>`;
+  if (!rows.length) return `<div class="res-card" style="border-radius:14px"><div style="text-align:center;color:#94A3B8;padding:24px">No resources match “${resSearch}”.</div></div>`;
   const WK = resWeeks();
   const byMo = {}; WK.forEach(w => { (byMo[w.monthKey] = byMo[w.monthKey] || []).push(w); });
   const months = Object.keys(byMo);
@@ -4397,7 +4404,8 @@ function resGridHTML() {
   const NAMEW = 190, CELLW = 46;
   const monthHead = months.map(k => `<th colspan="${byMo[k].length}" style="position:sticky;top:0;z-index:5;background:#0F2544;color:#fff;font-size:10px;font-weight:700;padding:4px 0;border-right:1px solid #22375a;text-align:center">${monLabel(k)}</th>`).join('');
   const weekHead = WK.map(w => `<th style="position:sticky;top:22px;z-index:4;background:#13315c;color:#cbd5e1;font-size:8.5px;font-weight:600;padding:3px 0;min-width:${CELLW}px;border-right:1px solid #22375a;text-align:center">${w.label}</th>`).join('');
-  const body = rows.slice(0, 300).map((r, i) => {
+  const body = rows.slice(0, 300).map((r) => {
+    const i = allRows.indexOf(r);   // original index so click-to-open targets the right resource when filtered
     const off = r.active === false;
     const fSplit = {}, aSplit = {};
     months.forEach(k => { const fmd = +((r.forecast || {})[k] || 0); if (fmd > 0) { const arr = resSplitMonth(fmd * 7.5, byMo[k].length); byMo[k].forEach((w, ix) => { fSplit[w.key] = arr[ix]; }); } const amd = +((r.actual || {})[k] || 0); if (amd > 0) { const arr = resSplitMonth(amd * 7.5, byMo[k].length); byMo[k].forEach((w, ix) => { aSplit[w.key] = arr[ix]; }); } });
@@ -5101,16 +5109,19 @@ function scRender() {
 }
 
 function applyInternalMode() {
+  const genesis = isGenesis();
+  // AAR portfolio tabs — hidden for Genesis (its own product surface)
+  ['tabStream', 'tabSquad', 'tabStatus', 'tabResourcesA', 'tabLevelling', 'tabSizing'].forEach(id => { const b = document.getElementById(id); if (b) b.style.display = genesis ? 'none' : ''; });
   const d = document.getElementById('tabDashboard');
   const s = document.getElementById('tabSettings');
   const rs = document.getElementById('tabResourcing');
   const rm = document.getElementById('tabRoadmap');
   const sc = document.getElementById('tabScope');
-  if (d) d.style.display = internalMode ? '' : 'none';
+  if (d) d.style.display = (genesis || internalMode) ? '' : 'none';   // Genesis always has a Dashboard landing
   if (s) s.style.display = internalMode ? '' : 'none';
-  if (rs) rs.style.display = (internalMode && isGenesis()) ? '' : 'none';   // Genesis-only
-  if (rm) rm.style.display = (internalMode && isGenesis()) ? '' : 'none';   // Genesis-only
-  if (sc) sc.style.display = (internalMode && isGenesis()) ? '' : 'none';   // Genesis-only
+  if (rs) rs.style.display = (internalMode && genesis) ? '' : 'none';
+  if (rm) rm.style.display = (internalMode && genesis) ? '' : 'none';
+  if (sc) sc.style.display = (internalMode && genesis) ? '' : 'none';
   const btn = document.getElementById('internalToggle');
   if (btn) {
     btn.textContent  = internalMode ? '🔓 Internal' : '🔒';
@@ -5120,10 +5131,14 @@ function applyInternalMode() {
       ? 'Internal views (Dashboard & Settings) are visible — click to hide before presenting'
       : 'Internal views hidden (customer-safe) — click to show Dashboard & Settings';
   }
-  // If hiding while currently on a now-hidden view, fall back to the timeline
-  if ((!internalMode && (viewMode === 'dashboard' || viewMode === 'settings')) || ((viewMode === 'resourcing' || viewMode === 'roadmap' || viewMode === 'scope') && !(internalMode && isGenesis()))) {
-    const t = [...document.querySelectorAll('.vtab')].find(x => x.textContent.includes('By Stream'));
-    setView('stream', t);
+  // If currently on a now-hidden view, fall back to a visible one (Genesis → Dashboard, others → timeline)
+  const aarViews = ['stream', 'squad', 'status', 'resources', 'levelling', 'sizing'];
+  const onHidden = (genesis && aarViews.includes(viewMode))
+    || (!internalMode && (viewMode === 'dashboard' || viewMode === 'settings'))
+    || ((viewMode === 'resourcing' || viewMode === 'roadmap' || viewMode === 'scope') && !(internalMode && genesis));
+  if (onHidden) {
+    if (genesis) setView('dashboard', document.getElementById('tabDashboard'));
+    else { const t = [...document.querySelectorAll('.vtab')].find(x => x.textContent.includes('By Stream')); setView('stream', t); }
   }
 }
 function toggleInternal() {

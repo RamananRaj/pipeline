@@ -5265,14 +5265,18 @@ function scRender() {
 // ═══════════════════════════════════════════════════════════════════════════
 //  Genesis Management Report — in-app view, Print/PDF, and email-ready HTML
 // ═══════════════════════════════════════════════════════════════════════════
+let reportRel = null, reportThemes = false;
+function reportSetRel(r) { reportRel = r; renderReport(); }
+function reportSetThemes(v) { reportThemes = !!v; renderReport(); }
 function genReportBody() {
   const fmt = n => Math.round(n).toLocaleString();
+  const rel = reportRel || scRel || 'R2.2';
   const T = resTotals(); const mk = resMonths(); const nowKey = new Date().toISOString().slice(0, 7); const rows = resourcing.rows || [];
   let etcTot = 0;
   rows.forEach(r => { let rf = 0, rfEl = 0; mk.forEach(mo => { if (!resFcInMonth(r, mo.key)) return; const fv = +((r.forecast || {})[mo.key] || 0); rf += fv; if (mo.key <= nowKey) rfEl += fv; }); etcTot += (r.etc != null ? r.etc : Math.max(0, rf - rfEl)); });
   const varE = T.aEl - T.fEl, varPct = T.fEl > 0 ? varE / T.fEl * 100 : 0;
   const activeCount = rows.filter(r => r.active !== false).length;
-  const segs = (scope.segments || []).filter(s => s.release === (scRel || 'R2.2'));
+  const segs = (scope.segments || []).filter(s => s.release === rel);
   let sMd = 0, sAdj = 0, sSt = 0;
   segs.forEach(seg => { const b = scDomsMD((scope.domainMap || {})[seg.name] || []).fc; sMd += b; sAdj += b * (1 - (+seg.ai || 0) / 100); (seg.themes || []).forEach(t => sSt += (+t.stories || 0)); });
   const H1 = 'font-size:14px;color:#0F2544;font-weight:800;margin:22px 0 8px;letter-spacing:.02em;text-transform:uppercase';
@@ -5293,7 +5297,7 @@ function genReportBody() {
   const monthTbl = `<table style="${TB}"><thead><tr><th style="${TH}">Month</th><th style="${TH};text-align:right">Forecast MD</th><th style="${TH};text-align:right">Actual MD</th></tr></thead><tbody>${monthly.map(m => `<tr><td style="${TD}">${m.mo.label}</td><td style="${TD};text-align:right">${fmt(m.f)}</td><td style="${TD};text-align:right">${m.a ? fmt(m.a) : '—'}</td></tr>`).join('')}</tbody></table>`;
   const dom = {}; rows.forEach(r => { const d = r.domain || '—'; dom[d] = dom[d] || { head: 0, fc: 0, ac: 0, rem: 0 }; let rf = 0, rfEl = 0; mk.forEach(mo => { if (resFcInMonth(r, mo.key)) { const f = +((r.forecast || {})[mo.key] || 0); dom[d].fc += f; rf += f; if (mo.key <= nowKey) rfEl += f; } if (resAcInMonth(r, mo.key)) dom[d].ac += +((r.actual || {})[mo.key] || 0); }); dom[d].rem += (r.etc != null ? r.etc : Math.max(0, rf - rfEl)); if (r.active !== false) dom[d].head++; });
   const domTbl = `<table style="${TB}"><thead><tr><th style="${TH}">Domain</th><th style="${TH};text-align:right">Head</th><th style="${TH};text-align:right">Forecast</th><th style="${TH};text-align:right">Actual</th><th style="${TH};text-align:right">Remaining</th></tr></thead><tbody>${Object.entries(dom).sort((a, b) => b[1].fc - a[1].fc).map(([d, v]) => `<tr><td style="${TD};font-weight:600">${d}</td><td style="${TD};text-align:right">${v.head}</td><td style="${TD};text-align:right">${fmt(v.fc)}</td><td style="${TD};text-align:right">${fmt(v.ac)}</td><td style="${TD};text-align:right">${fmt(v.rem)}</td></tr>`).join('')}<tr><td style="${TD};font-weight:800">Total</td><td style="${TD};text-align:right;font-weight:800">${Object.values(dom).reduce((s, v) => s + v.head, 0)}</td><td style="${TD};text-align:right;font-weight:800">${fmt(T.fTot)}</td><td style="${TD};text-align:right;font-weight:800">${fmt(T.aTot)}</td><td style="${TD};text-align:right;font-weight:800">${fmt(Object.values(dom).reduce((s, v) => s + v.rem, 0))}</td></tr></tbody></table>`;
-  const scopeTbl = segs.length ? `<table style="${TB}"><thead><tr><th style="${TH}">Segment</th><th style="${TH};text-align:right">Stories</th><th style="${TH};text-align:right">Baseline MD</th><th style="${TH};text-align:right">AI %</th><th style="${TH};text-align:right">AI-adj MD</th><th style="${TH};text-align:right">% complete</th></tr></thead><tbody>${segs.map(seg => { const b = scDomsMD((scope.domainMap || {})[seg.name] || []).fc; const st = scSegTotals(seg); return `<tr><td style="${TD};font-weight:600">${seg.name}</td><td style="${TD};text-align:right">${st.stories || '—'}</td><td style="${TD};text-align:right">${fmt(b)}</td><td style="${TD};text-align:right">${+seg.ai || 0}%</td><td style="${TD};text-align:right">${fmt(b * (1 - (+seg.ai || 0) / 100))}</td><td style="${TD};text-align:right">${st.pct}%</td></tr>`; }).join('')}<tr><td style="${TD};font-weight:800">Release total</td><td style="${TD};text-align:right;font-weight:800">${sSt}</td><td style="${TD};text-align:right;font-weight:800">${fmt(sMd)}</td><td style="${TD}"></td><td style="${TD};text-align:right;font-weight:800">${fmt(sAdj)}</td><td style="${TD}"></td></tr></tbody></table>` : `<div style="font-size:12px;color:#94A3B8">No scope defined for ${scRel || 'this release'}.</div>`;
+  const scopeTbl = segs.length ? `<table style="${TB}"><thead><tr><th style="${TH}">Segment${reportThemes ? ' · Theme' : ''}</th><th style="${TH};text-align:right">Stories</th><th style="${TH};text-align:right">Baseline MD</th><th style="${TH};text-align:right">AI %</th><th style="${TH};text-align:right">AI-adj MD</th><th style="${TH};text-align:right">% complete</th></tr></thead><tbody>${segs.map(seg => { const b = scDomsMD((scope.domainMap || {})[seg.name] || []).fc; const st = scSegTotals(seg); const segRow = `<tr><td style="${TD};font-weight:600">${seg.name}</td><td style="${TD};text-align:right">${st.stories || '—'}</td><td style="${TD};text-align:right">${fmt(b)}</td><td style="${TD};text-align:right">${+seg.ai || 0}%</td><td style="${TD};text-align:right">${fmt(b * (1 - (+seg.ai || 0) / 100))}</td><td style="${TD};text-align:right">${st.pct}%</td></tr>`; const themeRows = reportThemes ? (seg.themes || []).map(t => `<tr><td style="${TD};padding-left:26px;color:#475569">${t.name || 'Theme'}${t.story ? ` <span style="color:#94A3B8">· ${t.story}</span>` : ''}</td><td style="${TD};text-align:right;color:#475569">${+t.stories || 0}</td><td style="${TD}"></td><td style="${TD}"></td><td style="${TD}"></td><td style="${TD};text-align:right;color:#475569">${Math.max(0, Math.min(100, +t.pct || 0))}%</td></tr>`).join('') : ''; return segRow + themeRows; }).join('')}<tr><td style="${TD};font-weight:800">Release total</td><td style="${TD};text-align:right;font-weight:800">${sSt}</td><td style="${TD};text-align:right;font-weight:800">${fmt(sMd)}</td><td style="${TD}"></td><td style="${TD};text-align:right;font-weight:800">${fmt(sAdj)}</td><td style="${TD}"></td></tr></tbody></table>` : `<div style="font-size:12px;color:#94A3B8">No scope defined for ${rel}.</div>`;
   const resDomSet = new Set(rows.map(r => (r.domain || '').trim().toLowerCase()).filter(Boolean));
   const tlDom = {}, rsDom = {}; let barCount = 0;
   (roadmap.sections || []).forEach(s => (s.groups || []).forEach(g => (g.lanes || []).forEach(ln => { let dm = (ln.domain || '').trim(); if (!dm && resDomSet.has((ln.name || '').trim().toLowerCase())) dm = (ln.name || '').trim(); (ln.bars || []).forEach(b => { barCount++; if (!dm || !b.start || !b.end) return; const dl = dm.toLowerCase(); mk.forEach(mo => { if (mo.key >= b.start.slice(0, 7) && mo.key <= b.end.slice(0, 7)) (tlDom[dl] = tlDom[dl] || { d: dm, m: new Set() }).m.add(mo.key); }); }); })));
@@ -5305,22 +5309,36 @@ function genReportBody() {
   const flag = (label, n, items, color) => `<div style="margin:4px 0"><span style="display:inline-block;min-width:22px;text-align:center;background:${n ? color : '#DCFCE7'};color:${n ? '#fff' : '#15803D'};font-weight:700;border-radius:9px;padding:1px 7px;font-size:11px">${n}</span> <strong style="font-size:12px">${label}</strong>${items && items.length ? `<div style="font-size:11px;color:#64748B;margin:2px 0 0 30px">${items.slice(0, 12).join(' · ')}${items.length > 12 ? ' …' : ''}</div>` : ''}</div>`;
   const coverage = `${flag('Activity planned, no resources', noRes.length, noRes, '#B45309')}${flag('Resources allocated, no activity', noAct.length, noAct, '#2563EB')}${flag('Incomplete resource records', incompleteN, null, '#DC2626')}`;
   const tlSummary = `<div style="font-size:12px;color:#1E293B">${(roadmap.sections || []).length} tracks · ${barCount} activities · ${(roadmap.milestones || []).length} milestones on the timeline.</div>`;
+  const sd = iso => { try { return rmFmtShort(iso); } catch (e) { return iso || ''; } };
+  const trackRows = [];
+  (roadmap.sections || []).forEach(s => (s.groups || []).forEach(g => (g.lanes || []).forEach(ln => (ln.bars || []).forEach(b => { trackRows.push(`<tr><td style="${TD};font-weight:600">${s.name || ''}</td><td style="${TD}">${(g.name ? g.name + ' · ' : '') + (ln.name || '')}</td><td style="${TD}">${b.label || ''}</td><td style="${TD};white-space:nowrap">${sd(b.start)}</td><td style="${TD};white-space:nowrap">${sd(b.end)}</td><td style="${TD};text-align:right">${Math.max(0, Math.min(100, +b.pct || 0))}%</td></tr>`); }))));
+  const trackTbl = trackRows.length ? `<table style="${TB}"><thead><tr><th style="${TH}">Track</th><th style="${TH}">Swimlane</th><th style="${TH}">Activity</th><th style="${TH}">Start</th><th style="${TH}">End</th><th style="${TH};text-align:right">%</th></tr></thead><tbody>${trackRows.join('')}</tbody></table>` : `<div style="font-size:12px;color:#94A3B8">No timeline activities.</div>`;
+  const mss = (roadmap.milestones || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const msTbl = mss.length ? `<table style="${TB}"><thead><tr><th style="${TH}">Milestone</th><th style="${TH}">Date</th></tr></thead><tbody>${mss.map(mn => `<tr><td style="${TD};font-weight:600">${mn.label || ''}</td><td style="${TD}">${sd(mn.date)}</td></tr>`).join('')}</tbody></table>` : '';
   return `
     <div style="border-bottom:3px solid #0F2544;padding-bottom:10px;margin-bottom:8px">
       <div style="font-size:20px;font-weight:800;color:#0F2544">Genesis — Programme Management Report</div>
-      <div style="font-size:12px;color:#64748B;margin-top:3px">Release ${scRel || 'R2.2'} · generated ${new Date().toLocaleDateString()} · forecast in man-days</div>
+      <div style="font-size:12px;color:#64748B;margin-top:3px">Release ${rel} · generated ${new Date().toLocaleDateString()} · forecast in man-days</div>
     </div>
     <div style="${H1}">1 · Programme summary</div>${kpis}
     <div style="${H1}">2 · Resourcing — forecast vs actual by month</div>${monthTbl}
     <div style="${H1}">Resourcing — by domain</div>${domTbl}
-    <div style="${H1}">3 · Scope by segment — ${scRel || 'R2.2'}</div>${scopeTbl}
-    <div style="${H1}">4 · Timeline &amp; coverage</div>${tlSummary}<div style="margin-top:8px">${coverage}</div>`;
+    <div style="${H1}">3 · Scope by segment — ${rel}</div>${scopeTbl}
+    <div style="${H1}">4 · Timeline — tracks &amp; activities</div>${tlSummary}<div style="margin-top:8px">${trackTbl}</div>
+    ${msTbl ? `<div style="${H1}">Milestones</div>${msTbl}` : ''}
+    <div style="${H1}">5 · Coverage checks</div><div style="margin-top:4px">${coverage}</div>`;
 }
 function renderReport() {
   const el = document.getElementById('reportView'); if (!el) return;
+  const rel = reportRel || scRel || 'R2.2';
+  const relOpts = scReleases().map(r => `<option value="${r}" ${r === rel ? 'selected' : ''}>${r}</option>`).join('');
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px">
-      <div style="font-size:20px;font-weight:800;color:#0F2544">Management report</div>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div style="font-size:20px;font-weight:800;color:#0F2544">Management report</div>
+        <label style="font-size:12px;color:#64748B">Release <select onchange="reportSetRel(this.value)" style="padding:5px 8px;border:1px solid #E2E8F0;border-radius:8px;font-size:12px;font-weight:600;margin-left:4px">${relOpts}</select></label>
+        <label style="font-size:12px;color:#64748B;display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" onchange="reportSetThemes(this.checked)" ${reportThemes ? 'checked' : ''}> Segment theme detail</label>
+      </div>
       <div style="display:flex;gap:8px"><button class="btn btn-ghost btn-sm" onclick="reportCopyHTML()" style="font-size:11px">📧 Copy HTML (email)</button><button class="btn btn-ghost btn-sm" onclick="reportPrint()" style="font-size:11px">🖨 Print / PDF</button></div>
     </div>
     <div style="max-width:920px;background:#fff;border:1px solid #E2E8F0;border-radius:12px;padding:26px 30px">${genReportBody()}</div>`;
@@ -5342,6 +5360,9 @@ function reportCopyHTML() {
 
 function applyInternalMode() {
   const genesis = isGenesis();
+  // AAR portfolio chrome (Planned/Actual toggle, Stream/Status/Squad filters, project search, stats strip) — not relevant to Genesis
+  const ctrls = document.querySelector('.controls'); if (ctrls) ctrls.style.display = genesis ? 'none' : '';
+  const statsB = document.getElementById('statsBar'); if (statsB) statsB.style.display = genesis ? 'none' : '';
   // AAR portfolio tabs — hidden for Genesis (its own product surface)
   ['tabStream', 'tabSquad', 'tabStatus', 'tabResourcesA', 'tabLevelling', 'tabSizing'].forEach(id => { const b = document.getElementById(id); if (b) b.style.display = genesis ? 'none' : ''; });
   const d = document.getElementById('tabDashboard');

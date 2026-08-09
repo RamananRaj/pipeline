@@ -5115,7 +5115,8 @@ function scRender() {
   const fmt = n => Math.round(n).toLocaleString();
   const segs = scSegs();
   let tStories = 0, tMd = 0, tAdj = 0, wpMd = 0, wMd = 0, wpSt = 0, wSt = 0, sumP = 0, nSeg = 0;
-  segs.forEach(seg => { const st = scSegTotals(seg); tStories += st.stories; tMd += st.md; tAdj += st.adj; wpMd += st.md * st.pct; wMd += st.md; wpSt += st.stories * st.pct; wSt += st.stories; sumP += st.pct; nSeg++; });
+  const scSegBase = seg => scDomsMD((scope.domainMap || {})[seg.name] || []).fc;   // baseline man-days from mapped resource domains
+  segs.forEach(seg => { const st = scSegTotals(seg); const segBase = scSegBase(seg); const segAdj = segBase * (1 - (+seg.ai || 0) / 100); tStories += st.stories; tMd += segBase; tAdj += segAdj; wpMd += segBase * st.pct; wMd += segBase; wpSt += st.stories * st.pct; wSt += st.stories; sumP += st.pct; nSeg++; });
   const tPct = wMd > 0 ? Math.round(wpMd / wMd) : wSt > 0 ? Math.round(wpSt / wSt) : nSeg ? Math.round(sumP / nSeg) : 0;
   const relOpts = rels.map(r => `<option value="${r}" ${r === scRel ? 'selected' : ''}>${r}</option>`).join('');
   const kpi = (l, v, c) => `<div style="background:#fff;border:1px solid #EEF1F6;border-radius:12px;padding:14px 16px;flex:1;min-width:120px"><div style="font-size:10.5px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:.5px">${l}</div><div style="font-size:22px;font-weight:800;color:${c || '#0F2544'};margin-top:5px">${v}</div></div>`;
@@ -5123,12 +5124,14 @@ function scRender() {
   let rows = '';
   segs.forEach(seg => {
     const st = scSegTotals(seg); const open = !scCollapsed.has(seg.id);
+    const segBase = scSegBase(seg); const segAdj = segBase * (1 - (+seg.ai || 0) / 100);
+    const mapped = (scope.domainMap || {})[seg.name] || [];
     rows += `<div style="display:flex;align-items:center;padding:7px 10px;border-bottom:1px solid #E2E8F0;background:#E6F1FB;color:#0C447C;font-weight:700">
-      <div style="flex:2.6;display:flex;align-items:center;gap:6px;min-width:0"><span onclick="scToggleSeg(${seg.id})" style="cursor:pointer;user-select:none">${open ? '▾' : '▸'}</span><span onclick="scEditSegment(${seg.id})" style="cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${seg.name || 'Segment'}</span></div>
+      <div style="flex:2.6;display:flex;align-items:center;gap:6px;min-width:0"><span onclick="scToggleSeg(${seg.id})" style="cursor:pointer;user-select:none">${open ? '▾' : '▸'}</span><span onclick="scEditSegment(${seg.id})" style="cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${seg.name || 'Segment'}</span>${mapped.length ? '' : '<span title="No resource domain mapped — Baseline is 0. Map domains below." style="color:#B45309;font-weight:400;font-size:10px">· unmapped</span>'}</div>
       <div style="flex:.8;text-align:right">${st.stories || '—'}</div>
-      <div style="flex:.9;text-align:right">${fmt(st.md)}</div>
+      <div style="flex:.9;text-align:right" title="From mapped resource domains: ${mapped.join(', ') || 'none'}">${fmt(segBase)}</div>
       <div style="flex:.8;text-align:right;display:flex;justify-content:flex-end;align-items:center;gap:2px"><input type="number" min="0" max="100" value="${+seg.ai || 0}" onchange="scSetAi(${seg.id},this.value)" title="AI benefit % for this segment" style="width:42px;text-align:right;padding:2px 4px;border:1px solid #CBD5E1;border-radius:5px;font-size:11px">%</div>
-      <div style="flex:.9;text-align:right">${fmt(st.adj)}</div>
+      <div style="flex:.9;text-align:right">${fmt(segAdj)}</div>
       <div style="flex:1.5;text-align:right">${st.pct}%</div>
       <div style="width:44px;text-align:center"><button onclick="scAddTheme(${seg.id})" title="Add theme" style="border:1px solid #E2E8F0;background:#fff;color:#2563EB;border-radius:5px;cursor:pointer;font-size:11px;line-height:16px;padding:0 5px">+</button><button onclick="scDelSegment(${seg.id})" title="Delete segment" style="border:none;background:none;color:#0C447C;cursor:pointer;font-size:14px;margin-left:2px">×</button></div>
     </div>`;
@@ -5177,7 +5180,7 @@ function scRender() {
     ${empty}
     <div style="border:1px solid #E2E8F0;border-radius:12px;overflow:hidden">${hdr}${rows}${segs.length ? totalRow : ''}</div>
     ${mapPanel}
-    <div style="font-size:10px;color:#94A3B8;margin-top:10px">Click a segment or theme to edit · AI % is set per segment and adjusts its themes · % complete rolls up weighted by man-days (or story count when man-days are 0).</div>`;
+    <div style="font-size:10px;color:#94A3B8;margin-top:10px">Baseline man-days flow from the mapped resource domains (see mapping below) · AI % is set per segment and adjusts its baseline · % complete rolls up weighted by baseline (or story count when 0).</div>`;
 }
 
 function applyInternalMode() {

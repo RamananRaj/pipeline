@@ -3783,8 +3783,8 @@ function genAiStats() {
 function genDashboardHTML() {
   const T = resTotals(); const fmt = n => Math.round(n).toLocaleString();
   const mk = resMonths(); const nowKey = new Date().toISOString().slice(0, 7); const rows = resourcing.rows || [];
-  let etcTot = 0;
-  rows.forEach(r => { let rf = 0, rfEl = 0; mk.forEach(mo => { if (!resFcInMonth(r, mo.key)) return; const fv = +((r.forecast || {})[mo.key] || 0); rf += fv; if (mo.key <= nowKey) rfEl += fv; }); etcTot += (r.etc != null ? r.etc : Math.max(0, rf - rfEl)); });
+  let etcTot = 0, etc21 = 0, etc22 = 0;
+  rows.forEach(r => { let rf = 0, rfEl = 0; mk.forEach(mo => { if (!resFcInMonth(r, mo.key)) return; const fv = +((r.forecast || {})[mo.key] || 0); rf += fv; if (mo.key <= nowKey) rfEl += fv; }); const e = (r.etc != null ? r.etc : Math.max(0, rf - rfEl)); etcTot += e; const rel = String(r.release || ''); if (rel.includes('2.1')) etc21 += e; else if (rel.includes('2.2')) etc22 += e; });
   const varE = T.aEl - T.fEl, varPct = T.fEl > 0 ? varE / T.fEl * 100 : 0;
   const activeCount = resUniq(rows.filter(r => r.active !== false));
   const totalUniq = resUniq(rows);
@@ -3798,7 +3798,7 @@ function genDashboardHTML() {
       ${kpi('Forecast (total)', fmt(T.fTot), 'man-days in window', '#0F2544')}
       ${kpi('Actual to date', fmt(T.aEl), 'of ' + fmt(T.fEl) + ' planned (elapsed)', '#2563EB')}
       ${kpi('Variance to date', (varPct > 0 ? '+' : '') + varPct.toFixed(1) + '%', Math.round(varE) + ' md vs plan', Math.abs(varPct) < 5 ? '#0F2544' : varPct > 0 ? '#B45309' : '#0F766E')}
-      ${kpi('Estimate to complete', fmt(etcTot), 'man-days remaining', '#0F2544')}
+      ${kpi('Estimate to complete', fmt(etcTot), (etc21 + etc22 > 0 ? 'R2.1 ' + fmt(etc21) + ' · R2.2 ' + fmt(etc22) : 'man-days remaining'), '#0F2544')}
       ${kpi('Est. at completion', fmt(T.aEl + etcTot), Math.round(T.aEl + etcTot - T.fTot) + ' vs baseline ' + fmt(T.fTot), (T.aEl + etcTot) > T.fTot * 1.02 ? '#B45309' : '#0F766E')}
       ${kpi('Active resources', activeCount, 'of ' + totalUniq + ' total', '#0F2544')}
       ${(() => { const ai = genAiStats(); const bits = Object.keys(ai.byRel).filter(r => ai.byRel[r].md > 0).map(r => `${r.replace(/^R/, '')} ${ai.pct(ai.byRel[r].md, ai.byRel[r].adj)}%`).join(' · '); return kpi('AI adoption', ai.overall + '%', bits ? 'by release: ' + bits : 'set AI % per segment in Scope', '#7C3AED'); })()}

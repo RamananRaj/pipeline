@@ -4721,13 +4721,28 @@ function resImport(mode) {
           const isTsv = /\.(tsv|txt)$/i.test(file.name || '');
           const wb = isTsv ? XLSX.read(new TextDecoder().decode(new Uint8Array(ev.target.result)), { type: 'string', FS: '\t', cellDates: true }) : XLSX.read(ev.target.result, { type: 'array', cellDates: true });
           const ws = wb.Sheets[wb.SheetNames[0]];
-          _resMapImport(XLSX.utils.sheet_to_json(ws, { header: 1, raw: true }), mode);
+          resAskImportMode(XLSX.utils.sheet_to_json(ws, { header: 1, raw: true }), mode);
         } catch (err) { alert('Import failed: ' + err.message); }
       };
       rd.readAsArrayBuffer(file);
     });
   };
   inp.click();
+}
+/** Ask whether to merge (add & update) or replace all before mapping the parsed rows. */
+function resAskImportMode(arr, mode) {
+  const existing = (resourcing.rows || []).length;
+  if (!existing) { _resMapImport(arr, mode); return; }   // nothing to replace — just load
+  uiModal('Import ' + mode + ' — apply how?', [
+    { id: 'imode', label: 'This file should', type: 'select', value: 'merge', options: [
+      ['merge', 'Merge — add new people & update matches (keep everyone else)'],
+      ['replace', 'Replace all — clear the current ' + existing + ' resources first']
+    ] }
+  ], 'Continue', v => {
+    if (v.imode === 'replace') {
+      uiConfirm('Replace all resources?', 'This deletes all ' + existing + ' resources in ' + ORG + ' and loads only what is in the file. This can only be undone from Cloud Sync history. Continue?', () => { resourcing.rows = []; _resMapImport(arr, mode); }, 'Replace all');
+    } else { _resMapImport(arr, mode); }
+  });
 }
 /** Export everything to one workbook: Summary (FC/Act/ETC/OT) + Forecast + Actual month sheets. */
 function resExportAll() {

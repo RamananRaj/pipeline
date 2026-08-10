@@ -3629,7 +3629,7 @@ function genDomainPoolPanel() {
   const mk = resMonths(); const nowKey = new Date().toISOString().slice(0, 7);
   const dom = {};
   (resourcing.rows || []).forEach(r => {
-    const d = r.domain || '—'; dom[d] = dom[d] || { head: 0, fc: 0, ac: 0, rem: 0, monthly: {}, people: [] };
+    const d = r.domain || '—'; dom[d] = dom[d] || { fc: 0, ac: 0, rem: 0, monthly: {}, ppl: {}, heads: new Set() };
     let fut = 0, rfc = 0, rac = 0, rot = 0;
     mk.forEach(mo => {
       const f = resFcInMonth(r, mo.key) ? +((r.forecast || {})[mo.key] || 0) : 0;
@@ -3640,9 +3640,14 @@ function genDomainPoolPanel() {
       if (f > 0) dom[d].monthly[mo.key] = (dom[d].monthly[mo.key] || 0) + 1;
     });
     const etc = r.etc != null ? r.etc : fut; dom[d].rem += etc;
-    if (r.active !== false) dom[d].head++;
-    dom[d].people.push({ name: r.name || '—', role: r.role || '', fc: rfc, ac: rac, ot: rot, active: r.active !== false });
+    const nm = r.name || '—';
+    if (r.active !== false) dom[d].heads.add(nm.toLowerCase());
+    const rel = String(r.release || ''); const isR21 = rel.includes('2.1'), isR22 = rel.includes('2.2');
+    const p = dom[d].ppl[nm] = dom[d].ppl[nm] || { name: nm, role: r.role || '', fc21: 0, fc22: 0, fc: 0, ac: 0, ot: 0, active: r.active !== false };
+    if (isR21 && !isR22) p.fc21 += rfc; else if (isR22 && !isR21) p.fc22 += rfc; else p.fc21 += rfc;
+    p.fc += rfc; p.ac += rac; p.ot += rot; if (r.active !== false) p.active = true; if (!p.role) p.role = r.role || '';
   });
+  Object.values(dom).forEach(v => { v.head = v.heads.size; v.people = Object.values(v.ppl); });
   const entries = Object.entries(dom).sort((a, b) => b[1].fc - a[1].fc);
   let maxHead = 1; entries.forEach(([, v]) => mk.forEach(mo => { maxHead = Math.max(maxHead, v.monthly[mo.key] || 0); }));
   const fmt = n => Math.round(n).toLocaleString();
@@ -3657,8 +3662,8 @@ function genDomainPoolPanel() {
     let detail = '';
     if (open) {
       const peeps = (q ? v.people.filter(p => (p.name || '').toLowerCase().includes(q)) : v.people).slice().sort((a, b) => b.fc - a.fc);
-      const people = peeps.map(p => `<tr style="${p.active ? '' : 'opacity:.5'}${q ? ';background:#FEF9C3' : ''}"><td style="padding:2px 8px;font-size:11px">${p.name}</td><td style="font-size:11px;color:#64748B">${p.role}</td><td style="text-align:right;font-size:11px">${fmt(p.fc)}</td><td style="text-align:right;font-size:11px;font-weight:600">${fmt(p.ac)}</td><td style="text-align:right;font-size:11px">${p.ot > 0 ? `<span style="color:#B45309;font-weight:700">⚑ ${fmt(p.ot)}</span>` : '<span style="color:#CBD5E1">—</span>'}</td></tr>`).join('');
-      detail = `<tr><td colspan="6" style="background:#F8FAFC;padding:8px 12px 10px 30px"><table style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;font-size:10px;color:#94A3B8;padding:2px 8px;text-transform:uppercase;letter-spacing:.3px">Resource (${peeps.length}${q ? ' of ' + v.people.length : ''})</th><th style="text-align:left;font-size:10px;color:#94A3B8">Role</th><th style="text-align:right;font-size:10px;color:#94A3B8">Forecast</th><th style="text-align:right;font-size:10px;color:#94A3B8">Actual</th><th style="text-align:right;font-size:10px;color:#94A3B8">OT</th></tr></thead><tbody>${people}</tbody></table></td></tr>`;
+      const people = peeps.map(p => `<tr style="${p.active ? '' : 'opacity:.5'}${q ? ';background:#FEF9C3' : ''}"><td style="padding:2px 8px;font-size:11px">${p.name}</td><td style="font-size:11px;color:#64748B">${p.role}</td><td style="text-align:right;font-size:11px">${fmt(p.fc21)}</td><td style="text-align:right;font-size:11px">${fmt(p.fc22)}</td><td style="text-align:right;font-size:11px;font-weight:600">${fmt(p.fc)}</td><td style="text-align:right;font-size:11px;font-weight:600">${fmt(p.ac)}</td><td style="text-align:right;font-size:11px">${p.ot > 0 ? `<span style="color:#B45309;font-weight:700">⚑ ${fmt(p.ot)}</span>` : '<span style="color:#CBD5E1">—</span>'}</td></tr>`).join('');
+      detail = `<tr><td colspan="6" style="background:#F8FAFC;padding:8px 12px 10px 30px"><table style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;font-size:10px;color:#94A3B8;padding:2px 8px;text-transform:uppercase;letter-spacing:.3px">Resource (${peeps.length}${q ? ' of ' + v.people.length : ''})</th><th style="text-align:left;font-size:10px;color:#94A3B8">Role</th><th style="text-align:right;font-size:10px;color:#94A3B8">R2.1 MD</th><th style="text-align:right;font-size:10px;color:#94A3B8">R2.2 MD</th><th style="text-align:right;font-size:10px;color:#94A3B8">Total FC</th><th style="text-align:right;font-size:10px;color:#94A3B8">Actual</th><th style="text-align:right;font-size:10px;color:#94A3B8">OT</th></tr></thead><tbody>${people}</tbody></table></td></tr>`;
     }
     return main + detail;
   }).join('') || `<tr><td colspan="6" style="text-align:center;color:#94A3B8;padding:16px">No resources match “${resSearch}”.</td></tr>`;

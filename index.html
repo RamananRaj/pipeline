@@ -4729,11 +4729,26 @@ function resImport(mode) {
   };
   inp.click();
 }
-/** Ask whether to merge (add & update) or replace all before mapping the parsed rows. */
+/** Wipe only the actuals (keep the roster & forecast) — used by Replace-actuals for the weekly file. */
+function resActualsClear() { (resourcing.rows || []).forEach(r => { r.actual = {}; r.actualWk = {}; r.overtime = {}; }); }
+/** Ask whether to merge or replace before mapping the parsed rows. Replace means different things for forecast vs actual. */
 function resAskImportMode(arr, mode) {
   const existing = (resourcing.rows || []).length;
   if (!existing) { _resMapImport(arr, mode); return; }   // nothing to replace — just load
-  uiModal('Import ' + mode + ' — apply how?', [
+  if (mode === 'actual') {
+    uiModal('Import actuals — apply how?', [
+      { id: 'imode', label: 'This week’s file should', type: 'select', value: 'replace', options: [
+        ['replace', 'Replace actuals — clear all existing actuals, then load (full / cumulative file)'],
+        ['merge', 'Merge — add/update only the weeks in this file (single-week file)']
+      ] }
+    ], 'Continue', v => {
+      if (v.imode === 'replace') {
+        uiConfirm('Replace all actuals?', 'Clears actual hours for all resources in ' + ORG + ' (the roster and forecast are kept), then loads only what is in the file. Continue?', () => { resActualsClear(); _resMapImport(arr, mode); }, 'Replace actuals');
+      } else { _resMapImport(arr, mode); }
+    });
+    return;
+  }
+  uiModal('Import forecast — apply how?', [
     { id: 'imode', label: 'This file should', type: 'select', value: 'merge', options: [
       ['merge', 'Merge — add new people & update matches (keep everyone else)'],
       ['replace', 'Replace all — clear the current ' + existing + ' resources first']
@@ -4852,10 +4867,12 @@ function _resMapImportLong(arr, mode) {
     if (!rec) { rec = { id: rmId(), name: e.name, role: e.role, domain: '', location: e.loc, release: '', forecast: {}, actual: {} }; resourcing.rows.push(rec); unmatched++; }
     else { if (!rec.role && e.role) rec.role = e.role; if (!rec.location && e.loc) rec.location = e.loc; if (!rec.domain) unmatched++; }
     rec[field] = rec[field] || {}; rec[wf] = rec[wf] || {};
+    Object.keys(e.wk).forEach(mk => { rec[wf][mk] = e.wk[mk]; });   // overwrite each week present in the file
+    // recompute month totals + overtime from the FULL set of weekly buckets, so a single-week file doesn't drop earlier weeks
     const accMon = {}, accOT = {};
-    Object.keys(e.wk).forEach(mk => { const hrs = e.wk[mk]; rec[wf][mk] = hrs; const mon = mk.slice(0, 7); accMon[mon] = (accMon[mon] || 0) + hrs; const ot = Math.max(0, hrs - WEEK_CAP); if (ot > 0) { accOT[mon] = (accOT[mon] || 0) + ot; otAny++; } });
+    Object.keys(rec[wf]).forEach(mk => { const hrs = rec[wf][mk]; const mon = mk.slice(0, 7); accMon[mon] = (accMon[mon] || 0) + hrs; const ot = Math.max(0, hrs - WEEK_CAP); if (ot > 0) { accOT[mon] = (accOT[mon] || 0) + ot; otAny++; } });
     Object.keys(accMon).forEach(mon => { rec[field][mon] = accMon[mon] / HRS_PER_DAY; });
-    if (field === 'actual') { rec.overtime = rec.overtime || {}; Object.keys(accOT).forEach(mon => { rec.overtime[mon] = +(accOT[mon] / HRS_PER_DAY).toFixed(2); }); }
+    if (field === 'actual') { rec.overtime = {}; Object.keys(accOT).forEach(mon => { rec.overtime[mon] = +(accOT[mon] / HRS_PER_DAY).toFixed(2); }); }
     n++;
   });
   let hExt = false;

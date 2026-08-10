@@ -3735,6 +3735,37 @@ function genSupportSummary() {
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">${kpi('Support headcount', sup.length)}${kpi('Support capacity', fte + ' FTE', '#0F766E')}</div>
     <div class="res-card" style="border-radius:12px;background:#FFFBEB"><div class="res-card-title">Support team</div>${rowsH}</div>`}`;
 }
+/** Management LOE — level of effort for the PM/PD/Admin layer: KPIs + per-person table + monthly trend. */
+const MGMT_RX = /director|project manager|programme manager|program manager|project admin|pmo/i;
+function genMgmtLOE() {
+  if (!isGenesis()) return '';
+  const all = resourcing.rows || [];
+  const rows = all.filter(r => MGMT_RX.test(r.role || ''));
+  if (!rows.length) return '';
+  const mk = resMonths(); const nowKey = new Date().toISOString().slice(0, 7);
+  const fmt = n => Math.round(n).toLocaleString();
+  let fcTot = 0, acTot = 0, etcTot = 0;
+  const per = rows.map(r => {
+    let fc = 0, ac = 0, fcEl = 0;
+    mk.forEach(mo => { if (resFcInMonth(r, mo.key)) { const fv = +((r.forecast || {})[mo.key] || 0); fc += fv; if (mo.key <= nowKey) fcEl += fv; } if (resAcInMonth(r, mo.key)) ac += +((r.actual || {})[mo.key] || 0); });
+    const etc = (r.etc != null ? r.etc : Math.max(0, fc - fcEl));
+    fcTot += fc; acTot += ac; etcTot += etc;
+    return { r, fc, ac, etc };
+  }).sort((a, b) => b.fc - a.fc);
+  let progFC = 0; all.forEach(r => mk.forEach(mo => { if (resFcInMonth(r, mo.key)) progFC += +((r.forecast || {})[mo.key] || 0); }));
+  const pctProg = progFC > 0 ? fcTot / progFC * 100 : 0;
+  const monthly = mk.map(mo => { let f = 0, a = 0; rows.forEach(r => { if (resFcInMonth(r, mo.key)) f += +((r.forecast || {})[mo.key] || 0); if (resAcInMonth(r, mo.key)) a += +((r.actual || {})[mo.key] || 0); }); return { mo, f, a }; });
+  const maxV = Math.max(1, ...monthly.map(m => Math.max(m.f, m.a)));
+  const bars = `<div style="display:flex;align-items:flex-end;gap:8px;height:150px;padding-top:6px">${monthly.map(m => { const fh = Math.round(m.f / maxV * 130), ah = Math.round(m.a / maxV * 130); return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:5px"><div style="display:flex;align-items:flex-end;gap:3px;height:132px"><div title="forecast ${fmt(m.f)} md" style="width:13px;height:${fh}px;background:#CBD5E1;border-radius:3px 3px 0 0"></div>${m.a > 0 ? `<div title="actual ${fmt(m.a)} md" style="width:13px;height:${ah}px;background:#7C3AED;border-radius:3px 3px 0 0"></div>` : ''}</div><div style="font-size:10px;color:#94A3B8">${m.mo.label}</div></div>`; }).join('')}</div>`;
+  const kpi = (l, v, s, c) => `<div style="background:#fff;border:1px solid #EEF1F6;border-radius:14px;padding:16px 18px;flex:1;min-width:150px;box-shadow:0 1px 2px rgba(15,37,68,.04)"><div style="font-size:10.5px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:.6px">${l}</div><div style="font-size:26px;font-weight:800;color:${c || '#0F2544'};margin-top:6px">${v}</div><div style="font-size:11px;color:#64748B;margin-top:5px">${s}</div></div>`;
+  const tbl = `<div class="res-card" style="border-radius:12px;margin-top:12px"><div class="res-card-title">By person</div>
+    <table class="dtable"><thead><tr><th>Name</th><th>Role</th><th>Domain</th><th>Release</th><th style="text-align:right">FC MD</th><th style="text-align:right">Act MD</th><th style="text-align:right">ETC MD</th></tr></thead><tbody>${per.map(p => `<tr><td style="font-weight:600;color:#0F2544">${p.r.name || '—'}${p.r.active === false ? ' <span style="color:#94A3B8;font-size:10px">(inactive)</span>' : ''}</td><td style="color:#64748B">${p.r.role || ''}</td><td style="color:#64748B">${p.r.domain || ''}</td><td style="color:#64748B">${p.r.release || ''}</td><td style="text-align:right">${fmt(p.fc)}</td><td style="text-align:right;color:#2563EB">${fmt(p.ac)}</td><td style="text-align:right">${fmt(p.etc)}</td></tr>`).join('')}<tr style="border-top:2px solid #E2E8F0;font-weight:800;background:#F8FAFC"><td>Total</td><td></td><td></td><td></td><td style="text-align:right">${fmt(fcTot)}</td><td style="text-align:right">${fmt(acTot)}</td><td style="text-align:right">${fmt(etcTot)}</td></tr></tbody></table></div>`;
+  const col = genChkCollapsed.has('mgmt');
+  return `<div style="font-size:16px;font-weight:800;color:#0F2544;margin:26px 0 10px;cursor:pointer" onclick="genChkToggle('mgmt')" title="Minimise / maximise"><span style="color:#94A3B8;margin-right:4px">${col ? '▸' : '▾'}</span>Management Effort <span style="font-size:12px;font-weight:500;color:#94A3B8">— PM / PD / Admin · ${rows.length} people</span></div>${col ? '' : `
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">${kpi('Management headcount', rows.length, 'PM / PD / Admin', '#7C3AED')}${kpi('Management forecast', fmt(fcTot) + ' MD', 'in window', '#0F2544')}${kpi('Management actual', fmt(acTot) + ' MD', 'to date', '#2563EB')}${kpi('% of total effort', pctProg.toFixed(1) + '%', 'of ' + fmt(progFC) + ' MD total', '#0F766E')}</div>
+    <div class="res-card" style="border-radius:12px"><div class="res-card-title">Management effort by month <span class="res-hint">grey = forecast · purple = actual</span></div>${bars}</div>
+    ${tbl}`}`;
+}
 /** Program AI adoption — man-day-weighted AI% from Scope, rolled up per release + overall. */
 function genAiStats() {
   const byRel = {}; let tMd = 0, tAdj = 0;
@@ -3771,6 +3802,7 @@ function genDashboardHTML() {
     <div class="res-card" style="border-radius:14px"><div class="res-card-title" onclick="genChkToggle('chart')" style="cursor:pointer" title="Minimise / maximise"><span style="color:#94A3B8;margin-right:4px">${genChkCollapsed.has('chart') ? '▸' : '▾'}</span>Forecast vs Actual by month <span class="res-hint">grey = forecast · blue = actual (timesheet upload)</span></div>${genChkCollapsed.has('chart') ? '' : bars}</div>
     ${genDomainPoolPanel()}
     ${genValidationHTML()}
+    ${genMgmtLOE()}
     ${genSupportSummary()}
     ${genGovSummary()}`;
 }

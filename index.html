@@ -4459,12 +4459,15 @@ function resSetWeek(id, wk, val) {
   if (wobj) resRecalcMonthFromWeeks(r, wobj.monthKey);
   persistResourcing(); renderResourcingView();
 }
-// Release toggle in the Resourcing view (Genesis): 'all' | 'R2.1' | 'R2.2' | any release value
-let resRelease = 'all';
+// Release + Reporting-code filters in the Resourcing view (Genesis)
+let resRelease = 'all', resReport = 'all';
 function resReleaseMatch(r) { if (resRelease === 'all') return true; const rel = String(r.release || ''); return rel === resRelease || rel.includes(resRelease.replace(/^R/, '')); }
-function resReleaseRows() { return (resourcing.rows || []).filter(resReleaseMatch); }
+function resReportMatch(r) { return resReport === 'all' || String(r.report || '') === resReport; }
 function resReleaseList() { return [...new Set((resourcing.rows || []).map(r => String(r.release || '').trim()).filter(Boolean))].sort(); }
+function resReportList() { return [...new Set((resourcing.rows || []).map(r => String(r.report || '').trim()).filter(Boolean))].sort(); }
+function resReleaseRows() { return (resourcing.rows || []).filter(r => resReleaseMatch(r) && resReportMatch(r)); }
 function resSetRelease(v) { resRelease = v; renderResourcingView(); }
+function resSetReport(v) { resReport = v; renderResourcingView(); }
 function resTotals(srcRows) {
   const mk = resMonths();
   const nowKey = new Date().toISOString().slice(0, 7);
@@ -4577,6 +4580,7 @@ function renderResourcingView() {
         <div style="font-size:12px;color:#64748B;margin-top:2px">Man-days per resource per month · ${rows.length} resources${isGenesis() && resRelease !== 'all' ? ' · <b style="color:#0F2544">' + resRelease + '</b>' : ''} · ${ORG}</div></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         ${isGenesis() ? `<span style="display:inline-flex;align-items:center;gap:4px;background:#F1F5F9;border-radius:9px;padding:2px">${['all', ...resReleaseList()].map(v => `<button onclick="resSetRelease('${v}')" style="border:none;cursor:pointer;font-size:11px;font-weight:700;padding:5px 11px;border-radius:8px;${resRelease === v ? 'background:#0F2544;color:#fff' : 'background:transparent;color:#475569'}">${v === 'all' ? 'All' : v}</button>`).join('')}</span>` : ''}
+        ${isGenesis() && resReportList().length ? `<select onchange="resSetReport(this.value)" title="Filter by reporting code" style="padding:6px 8px;border:1px solid #E2E8F0;border-radius:8px;font-size:12px;max-width:200px"><option value="all"${resReport === 'all' ? ' selected' : ''}>All reporting codes</option>${resReportList().map(c => `<option value="${c.replace(/"/g, '&quot;')}"${resReport === c ? ' selected' : ''}>${c.length > 34 ? c.slice(0, 34) + '…' : c}</option>`).join('')}</select>` : ''}
         <input id="resSearchInput" value="${resSearch.replace(/"/g, '&quot;')}" oninput="resFilterRows(this.value)" placeholder="🔍 Search name…" style="padding:6px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:12px;min-width:150px">
         <button class="btn btn-ghost btn-sm" onclick="resImport('forecast')" style="font-size:11px">⬆ Import forecast</button>
         <button class="btn btn-ghost btn-sm" onclick="resImport('actual')" style="font-size:11px">⬆ Import actuals</button>
@@ -4843,6 +4847,7 @@ function _resMapImport(arr, mode) {
   const iDom = find(['domain']);
   const iLoc = find(['location']);
   const iPhase = find(['phase', 'release']);
+  const iReport = find(['reporting code', 'report code', 'project code', 'project']);
   const dcols = [];
   arr[0].forEach((raw, i) => { if (raw instanceof Date) dcols.push([i, raw]); });
   // PMO long/tidy layout: weeks live in ROWS (Week Commencing Date + Actual Hours), not as dated columns
@@ -4862,8 +4867,11 @@ function _resMapImport(arr, mode) {
     const row = arr[r]; if (!row) continue;
     const nm = row[iName]; if (nm == null || String(nm).trim() === '') continue;
     const dom = iDom >= 0 ? String(row[iDom] || '') : '';
-    let rec = resourcing.rows.find(x => x.name === String(nm) && (x.domain || '') === dom && (x.release || '') === (iPhase >= 0 ? String(row[iPhase] || '') : (x.release || '')));
-    if (!rec) { rec = { id: Date.now() + r, name: String(nm), role: iRole >= 0 ? String(row[iRole] || '') : '', domain: dom, location: iLoc >= 0 ? String(row[iLoc] || '') : '', release: iPhase >= 0 ? String(row[iPhase] || '') : '', forecast: {}, actual: {} }; resourcing.rows.push(rec); }
+    const rep = iReport >= 0 ? String(row[iReport] || '') : '';
+    const rel = iPhase >= 0 ? String(row[iPhase] || '') : '';
+    let rec = resourcing.rows.find(x => x.name === String(nm) && (x.domain || '') === dom && (x.release || '') === (iPhase >= 0 ? rel : (x.release || '')) && (x.report || '') === (iReport >= 0 ? rep : (x.report || '')));
+    if (!rec) { rec = { id: Date.now() + r, name: String(nm), role: iRole >= 0 ? String(row[iRole] || '') : '', domain: dom, location: iLoc >= 0 ? String(row[iLoc] || '') : '', release: rel, report: rep, forecast: {}, actual: {} }; resourcing.rows.push(rec); }
+    else if (iReport >= 0 && !rec.report) rec.report = rep;
     rec[field] = rec[field] || {};
     const acc = {}, accOT = {}, accWk = {};   // sum by month; weekly cells cap at 37.5h (excess → overtime); accWk keeps raw weekly hours
     dcols.forEach(([ci, d]) => {

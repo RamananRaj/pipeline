@@ -4711,14 +4711,15 @@ function ensureXlsx(cb) {
   document.head.appendChild(s);
 }
 function resImport(mode) {
-  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.xlsx,.xls,.csv';
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.xlsx,.xls,.csv,.tsv,.txt';
   inp.onchange = e => {
     const file = e.target.files[0]; if (!file) return;
     ensureXlsx(() => {
       const rd = new FileReader();
       rd.onload = ev => {
         try {
-          const wb = XLSX.read(ev.target.result, { type: 'array', cellDates: true });
+          const isTsv = /\.(tsv|txt)$/i.test(file.name || '');
+          const wb = isTsv ? XLSX.read(new TextDecoder().decode(new Uint8Array(ev.target.result)), { type: 'string', FS: '\t', cellDates: true }) : XLSX.read(ev.target.result, { type: 'array', cellDates: true });
           const ws = wb.Sheets[wb.SheetNames[0]];
           _resMapImport(XLSX.utils.sheet_to_json(ws, { header: 1, raw: true }), mode);
         } catch (err) { alert('Import failed: ' + err.message); }
@@ -4766,7 +4767,12 @@ function _resMapImport(arr, mode) {
   const iPhase = find(['phase', 'release']);
   const dcols = [];
   arr[0].forEach((raw, i) => { if (raw instanceof Date) dcols.push([i, raw]); });
-  if (iName < 0 || !dcols.length) { alert('Could not find a Name column and dated columns.\nExpected a "Person Name" column plus dated columns — monthly (forecast man-days) or weekly (actual hours).'); return; }
+  // PMO long/tidy layout: weeks live in ROWS (Week Commencing Date + Actual Hours), not as dated columns
+  const iWeekLong = hdr.findIndex(h => /week\s*(commencing|ending|start)/i.test(h));
+  const iHrsLong = hdr.findIndex(h => /hours/i.test(h));
+  const iEmpLong = find(['employee', 'person name', 'name', 'resource']);
+  if (!dcols.length && iWeekLong >= 0 && iHrsLong >= 0 && iEmpLong >= 0) { return _resMapImportLong(arr, mode); }
+  if (iName < 0 || !dcols.length) { alert('Could not find a Name column and dated columns.\nExpected a "Person Name" column plus dated columns — monthly (forecast man-days) or weekly (actual hours) — or the PMO weekly format (Week Commencing Date + Actual Hours rows).'); return; }
   const monthOf = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
   const uniqMonths = new Set(dcols.map(([, d]) => monthOf(d)));
   const weekly = dcols.length > uniqMonths.size;   // more dated columns than months ⇒ weekly grain (hours per week)
@@ -4798,6 +4804,49 @@ function _resMapImport(arr, mode) {
   if (dcols.length) { const maxD = dcols.reduce((mx, [, d]) => d > mx ? d : mx, dcols[0][1]); const need = (maxD.getFullYear() - HORIZON.year) * 12 + (maxD.getMonth() - HORIZON.month) + 1; if (need > HORIZON.count) { HORIZON = { year: HORIZON.year, month: HORIZON.month, count: Math.min(60, need) }; localStorage.setItem(KP + 'horizon', JSON.stringify(HORIZON)); rebuildHorizon(); hExt = true; } }
   persistResourcing(); renderResourcingView();
   alert('Imported ' + n + ' rows into "' + field + '" — hours converted to man-days at 7.5 h/day (37.5 h/week).' + (weekly && otAny ? ' Hours over 37.5/week are flagged as overtime.' : '') + (hExt ? '\nTimeline horizon extended to cover the imported months.' : ''));
+}
+/** PMO long/tidy layout: one row per Employee × Week × Project-Task (Week Commencing Date + Actual Hours).
+ *  Rows are summed into each person's weekly bucket (Monday-keyed); Domain is inherited by matching Employee name. */
+function _resMapImportLong(arr, mode) {
+  const hdr = arr[0].map(h => String(h == null ? '' : h).trim());
+  const H = (...kw) => { for (const k of kw) { const i = hdr.findIndex(h => h.toLowerCase() === k); if (i >= 0) return i; } for (const k of kw) { const i = hdr.findIndex(h => h.toLowerCase().includes(k)); if (i >= 0) return i; } return -1; };
+  const iWeek = H('week commencing date', 'week commencing', 'week ending', 'week start', 'week');
+  const iEmp = H('employee', 'person name', 'name', 'resource');
+  const iJob = H('job title', 'sow role', 'role', 'title');
+  const iLoc = H('employee location', 'location');
+  const iHrs = H('actual hours', 'forecast hours', 'hours');
+  if (iWeek < 0 || iEmp < 0 || iHrs < 0) { alert('PMO weekly format needs Employee, Week Commencing Date and (Actual) Hours columns.'); return; }
+  const field = mode === 'actual' ? 'actual' : 'forecast';
+  const wf = field === 'actual' ? 'actualWk' : 'forecastWk';
+  const HRS_PER_DAY = 7.5, WEEK_CAP = 37.5;
+  const parseDate = v => { if (v instanceof Date) return v; if (typeof v === 'number') return new Date(Math.round((v - 25569) * 86400 * 1000)); const d = new Date(v); return isNaN(d) ? null : d; };
+  const byEmp = {}; let maxD = null, skipped = 0;
+  for (let r = 1; r < arr.length; r++) {
+    const row = arr[r]; if (!row) continue;
+    const nm = row[iEmp]; if (nm == null || String(nm).trim() === '') continue;
+    const wd = parseDate(row[iWeek]); const hrs = parseFloat(row[iHrs]);
+    if (!wd || isNaN(hrs)) { skipped++; continue; }
+    const key = String(nm).trim();
+    const e = (byEmp[key] = byEmp[key] || { name: key, role: iJob >= 0 ? String(row[iJob] || '') : '', loc: iLoc >= 0 ? String(row[iLoc] || '') : '', wk: {} });
+    const mk = resMondayKey(wd); e.wk[mk] = (e.wk[mk] || 0) + hrs;
+    if (!maxD || wd > maxD) maxD = wd;
+  }
+  let n = 0, otAny = 0, unmatched = 0;
+  Object.values(byEmp).forEach(e => {
+    let rec = resourcing.rows.find(x => (x.name || '').toLowerCase() === e.name.toLowerCase());
+    if (!rec) { rec = { id: rmId(), name: e.name, role: e.role, domain: '', location: e.loc, release: '', forecast: {}, actual: {} }; resourcing.rows.push(rec); unmatched++; }
+    else { if (!rec.role && e.role) rec.role = e.role; if (!rec.location && e.loc) rec.location = e.loc; if (!rec.domain) unmatched++; }
+    rec[field] = rec[field] || {}; rec[wf] = rec[wf] || {};
+    const accMon = {}, accOT = {};
+    Object.keys(e.wk).forEach(mk => { const hrs = e.wk[mk]; rec[wf][mk] = hrs; const mon = mk.slice(0, 7); accMon[mon] = (accMon[mon] || 0) + hrs; const ot = Math.max(0, hrs - WEEK_CAP); if (ot > 0) { accOT[mon] = (accOT[mon] || 0) + ot; otAny++; } });
+    Object.keys(accMon).forEach(mon => { rec[field][mon] = accMon[mon] / HRS_PER_DAY; });
+    if (field === 'actual') { rec.overtime = rec.overtime || {}; Object.keys(accOT).forEach(mon => { rec.overtime[mon] = +(accOT[mon] / HRS_PER_DAY).toFixed(2); }); }
+    n++;
+  });
+  let hExt = false;
+  if (maxD) { const need = (maxD.getFullYear() - HORIZON.year) * 12 + (maxD.getMonth() - HORIZON.month) + 1; if (need > HORIZON.count) { HORIZON = { year: HORIZON.year, month: HORIZON.month, count: Math.min(60, need) }; localStorage.setItem(KP + 'horizon', JSON.stringify(HORIZON)); rebuildHorizon(); hExt = true; } }
+  persistResourcing(); renderResourcingView();
+  alert('Imported ' + n + ' employees from the PMO weekly format into "' + field + '" — task rows summed per week (Monday) and converted at 7.5 h/day.' + (otAny ? ' Hours over 37.5/week flagged as overtime.' : '') + (hExt ? '\nTimeline horizon extended.' : '') + (unmatched ? '\n' + unmatched + ' name(s) had no Domain (new/unmatched) — set Domain in the Resources list so they roll up.' : '') + (skipped ? '\n' + skipped + ' row(s) skipped (missing date or hours).' : ''));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

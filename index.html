@@ -4459,12 +4459,18 @@ function resSetWeek(id, wk, val) {
   if (wobj) resRecalcMonthFromWeeks(r, wobj.monthKey);
   persistResourcing(); renderResourcingView();
 }
-function resTotals() {
+// Release toggle in the Resourcing view (Genesis): 'all' | 'R2.1' | 'R2.2' | any release value
+let resRelease = 'all';
+function resReleaseMatch(r) { if (resRelease === 'all') return true; const rel = String(r.release || ''); return rel === resRelease || rel.includes(resRelease.replace(/^R/, '')); }
+function resReleaseRows() { return (resourcing.rows || []).filter(resReleaseMatch); }
+function resReleaseList() { return [...new Set((resourcing.rows || []).map(r => String(r.release || '').trim()).filter(Boolean))].sort(); }
+function resSetRelease(v) { resRelease = v; renderResourcingView(); }
+function resTotals(srcRows) {
   const mk = resMonths();
   const nowKey = new Date().toISOString().slice(0, 7);
   let fTot = 0, aTot = 0, fEl = 0, aEl = 0;
   const byDom = {};
-  (resourcing.rows || []).forEach(r => {
+  (srcRows || resourcing.rows || []).forEach(r => {
     mk.forEach(mo => {
       const fcOK = resFcInMonth(r, mo.key), acOK = resAcInMonth(r, mo.key);
       if (!fcOK && !acOK) return;
@@ -4482,7 +4488,8 @@ function resTotals() {
   return { mk, fTot, aTot, fEl, aEl, byDom };
 }
 function renderResourcingView() {
-  const T = resTotals(), rows = resourcing.rows || [];
+  const rows = isGenesis() ? resReleaseRows() : (resourcing.rows || []);
+  const T = resTotals(rows);
   const fmt = n => Math.round(n).toLocaleString();
   const varE = T.aEl - T.fEl, varPct = T.fEl > 0 ? varE / T.fEl * 100 : 0;
   const kpi = (l, v, s, c) => `<div style="background:#fff;border:1px solid #EEF1F6;border-radius:14px;padding:16px 18px;flex:1;min-width:150px;box-shadow:0 1px 2px rgba(15,37,68,.04)"><div style="font-size:10.5px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:.6px">${l}</div><div style="font-size:26px;font-weight:800;color:${c || '#0F2544'};margin-top:6px;letter-spacing:-.01em">${v}</div><div style="font-size:11px;color:#64748B;margin-top:5px">${s}</div></div>`;
@@ -4567,8 +4574,9 @@ function renderResourcingView() {
   document.getElementById('resourcingView').innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px">
       <div><div style="font-size:20px;font-weight:800;color:#0F2544;letter-spacing:-.01em">Resourcing — Forecast vs Actual</div>
-        <div style="font-size:12px;color:#64748B;margin-top:2px">Man-days per resource per month · ${rows.length} resources · ${ORG}</div></div>
+        <div style="font-size:12px;color:#64748B;margin-top:2px">Man-days per resource per month · ${rows.length} resources${isGenesis() && resRelease !== 'all' ? ' · <b style="color:#0F2544">' + resRelease + '</b>' : ''} · ${ORG}</div></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        ${isGenesis() ? `<span style="display:inline-flex;align-items:center;gap:4px;background:#F1F5F9;border-radius:9px;padding:2px">${['all', ...resReleaseList()].map(v => `<button onclick="resSetRelease('${v}')" style="border:none;cursor:pointer;font-size:11px;font-weight:700;padding:5px 11px;border-radius:8px;${resRelease === v ? 'background:#0F2544;color:#fff' : 'background:transparent;color:#475569'}">${v === 'all' ? 'All' : v}</button>`).join('')}</span>` : ''}
         <input id="resSearchInput" value="${resSearch.replace(/"/g, '&quot;')}" oninput="resFilterRows(this.value)" placeholder="🔍 Search name…" style="padding:6px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:12px;min-width:150px">
         <button class="btn btn-ghost btn-sm" onclick="resImport('forecast')" style="font-size:11px">⬆ Import forecast</button>
         <button class="btn btn-ghost btn-sm" onclick="resImport('actual')" style="font-size:11px">⬆ Import actuals</button>
@@ -4622,7 +4630,7 @@ function resGridSet(id, wk, val) {
   if (seeded) renderResourcingView();
 }
 function resGridHTML() {
-  const allRows = resourcing.rows || [];
+  const allRows = isGenesis() ? resReleaseRows() : (resourcing.rows || []);
   const rows = resSearch ? allRows.filter(r => (r.name || '').toLowerCase().includes(resSearch.toLowerCase())) : allRows;
   if (!allRows.length) return `<div class="res-card" style="border-radius:14px"><div style="text-align:center;color:#94A3B8;padding:24px">No resources yet.</div></div>`;
   if (!rows.length) return `<div class="res-card" style="border-radius:14px"><div style="text-align:center;color:#94A3B8;padding:24px">No resources match “${resSearch}”.</div></div>`;

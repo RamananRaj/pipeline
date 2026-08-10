@@ -3628,7 +3628,7 @@ function genDomainPoolPanel() {
   if (!isGenesis() || !(resourcing.rows || []).length) return '';
   const mk = resMonths(); const nowKey = new Date().toISOString().slice(0, 7);
   const dom = {};
-  (resourcing.rows || []).forEach(r => {
+  (resourcing.rows || []).filter(r => !resIsCarve(r)).forEach(r => {
     const d = r.domain || '—'; dom[d] = dom[d] || { fc: 0, ac: 0, rem: 0, monthly: {}, ppl: {}, heads: new Set() };
     let fut = 0, rfc = 0, rac = 0, rot = 0;
     mk.forEach(mo => {
@@ -3728,6 +3728,25 @@ function genGovSummary() {
   return `<div style="font-size:16px;font-weight:800;color:#0F2544;margin:26px 0 10px">Governance</div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">${kpi('Open CRs', openCRs.length)}${kpi('CR effort', fmt(crEff) + ' MD', '#0F766E')}${kpi('Open risks / issues', openR.length)}${kpi('Red risks', red.length, red.length ? '#DC2626' : '#16A34A')}</div>${list}`;
 }
+/** PR107726 reported as its own section (carved out of the headline totals). */
+function genPR107726Summary() {
+  if (!isGenesis()) return '';
+  const carve = (resourcing.rows || []).filter(resIsCarve);
+  if (!carve.length) return '';
+  const mk = resMonths(); const nowKey = new Date().toISOString().slice(0, 7); const fmt = n => Math.round(n).toLocaleString();
+  let fc = 0, ac = 0, etc = 0, f21 = 0, f22 = 0, e21 = 0, e22 = 0;
+  carve.forEach(r => {
+    let rf = 0, rfEl = 0, ra = 0;
+    mk.forEach(mo => { if (resFcInMonth(r, mo.key)) { const fv = +((r.forecast || {})[mo.key] || 0); rf += fv; if (mo.key <= nowKey) rfEl += fv; } if (resAcInMonth(r, mo.key)) ra += +((r.actual || {})[mo.key] || 0); });
+    const et = (r.etc != null ? r.etc : Math.max(0, rf - rfEl)); fc += rf; ac += ra; etc += et;
+    const rel = String(r.release || ''); if (rel.includes('2.1')) { f21 += rf; e21 += et; } else if (rel.includes('2.2')) { f22 += rf; e22 += et; }
+  });
+  const head = resUniq(carve);
+  const kpi = (l, v, s, c) => `<div style="background:#fff;border:1px solid #EEF1F6;border-radius:14px;padding:16px 18px;flex:1;min-width:150px;box-shadow:0 1px 2px rgba(15,37,68,.04)"><div style="font-size:10.5px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:.6px">${l}</div><div style="font-size:26px;font-weight:800;color:${c || '#0F2544'};margin-top:6px">${v}</div><div style="font-size:11px;color:#64748B;margin-top:5px">${s}</div></div>`;
+  const col = genChkCollapsed.has('pr107726');
+  return `<div style="font-size:16px;font-weight:800;color:#0F2544;margin:26px 0 10px;cursor:pointer" onclick="genChkToggle('pr107726')" title="Minimise / maximise"><span style="color:#94A3B8;margin-right:4px">${col ? '▸' : '▾'}</span>PR107726 — reported separately <span style="font-size:12px;font-weight:500;color:#94A3B8">— CRM · Sales · CPQ &amp; EPC · ${head} people · excluded from the headline totals above</span></div>${col ? '' : `
+    <div style="display:flex;gap:12px;flex-wrap:wrap">${kpi('Forecast', fmt(fc) + ' MD', 'R2.1 ' + fmt(f21) + ' · R2.2 ' + fmt(f22), '#0F2544')}${kpi('Actual to date', fmt(ac) + ' MD', '', '#2563EB')}${kpi('Estimate to complete', fmt(etc) + ' MD', 'R2.1 ' + fmt(e21) + ' · R2.2 ' + fmt(e22), '#0F2544')}${kpi('Headcount', head, 'unique people', '#0F2544')}</div>`}`;
+}
 function genSupportSummary() {
   if (!isGenesis()) return '';
   const sup = resourcing.support || [];
@@ -3747,7 +3766,7 @@ function genMgmtLOE() { return genRoleEffort({ title: 'Management Effort', sub: 
 function genTestLOE() { return genRoleEffort({ title: 'Testing Effort', sub: 'Test Manager / Lead / Analyst', rx: TEST_RX, key: 'test', accent: '#0EA5E9' }); }
 function genRoleEffort(cfg) {
   if (!isGenesis()) return '';
-  const all = resourcing.rows || [];
+  const all = (resourcing.rows || []).filter(r => !resIsCarve(r));
   const rows = all.filter(r => cfg.rx.test(r.role || ''));
   if (!rows.length) return '';
   const mk = resMonths(); const nowKey = new Date().toISOString().slice(0, 7);
@@ -3786,8 +3805,9 @@ function genAiStats() {
 }
 /** Genesis Dashboard — Resourcing Forecast vs Actual summary + by-Domain pool (no AAR utilisation). */
 function genDashboardHTML() {
-  const T = resTotals(); const fmt = n => Math.round(n).toLocaleString();
-  const mk = resMonths(); const nowKey = new Date().toISOString().slice(0, 7); const rows = resourcing.rows || [];
+  const fmt = n => Math.round(n).toLocaleString();
+  const mk = resMonths(); const nowKey = new Date().toISOString().slice(0, 7); const rows = (resourcing.rows || []).filter(r => !resIsCarve(r));
+  const T = resTotals(rows);
   let etcTot = 0, etc21 = 0, etc22 = 0;
   rows.forEach(r => { let rf = 0, rfEl = 0; mk.forEach(mo => { if (!resFcInMonth(r, mo.key)) return; const fv = +((r.forecast || {})[mo.key] || 0); rf += fv; if (mo.key <= nowKey) rfEl += fv; }); const e = (r.etc != null ? r.etc : Math.max(0, rf - rfEl)); etcTot += e; const rel = String(r.release || ''); if (rel.includes('2.1')) etc21 += e; else if (rel.includes('2.2')) etc22 += e; });
   const varE = T.aEl - T.fEl, varPct = T.fEl > 0 ? varE / T.fEl * 100 : 0;
@@ -3814,7 +3834,8 @@ function genDashboardHTML() {
     ${genMgmtLOE()}
     ${genTestLOE()}
     ${genSupportSummary()}
-    ${genGovSummary()}`;
+    ${genGovSummary()}
+    ${genPR107726Summary()}`;
 }
 function renderDashboardView() {
   if (isGenesis()) { document.getElementById('dashboardView').innerHTML = genDashboardHTML(); return; }
@@ -4471,6 +4492,9 @@ function resReportMatch(r) { return resReport === 'all' || String(r.report || ''
 function resReleaseList() { return [...new Set((resourcing.rows || []).map(r => String(r.release || '').trim()).filter(Boolean))].sort(); }
 function resReportList() { return [...new Set((resourcing.rows || []).map(r => String(r.report || '').trim()).filter(Boolean))].sort(); }
 function resReleaseRows() { return (resourcing.rows || []).filter(r => resReleaseMatch(r) && resReportMatch(r)); }
+// Dashboard carve-out: PR107726 is reported as its own section, excluded from the headline totals
+const RES_CARVE = /pr107726/i;
+function resIsCarve(r) { return RES_CARVE.test(String(r.report || '')); }
 function resSetRelease(v) { resRelease = v; renderResourcingView(); }
 function resSetReport(v) { resReport = v; renderResourcingView(); }
 function resTotals(srcRows) {

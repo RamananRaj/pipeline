@@ -3762,23 +3762,31 @@ function genSupportSummary() {
 /** Role-based effort panel (Management, Testing, …): KPIs + per-person table + monthly trend. */
 const MGMT_RX = /director|project manager|programme manager|program manager|project admin|pmo/i;
 const TEST_RX = /\btest/i;   // Test Manager / Test Lead / Test Analyst / Senior Test Analyst … (any role with a "Test" word)
-function genMgmtLOE() { return genRoleEffort({ title: 'Management Effort', sub: 'PM / PD / Admin', rx: MGMT_RX, key: 'mgmt', accent: '#7C3AED' }); }
+const MGMT_EXTRA = ['bhanu kaushal', 'chetan raniga', 'glen moody'];   // included in Management by name (roles read Engineering Manager / Data Migration Lead / PM)
+function genMgmtLOE() { return genRoleEffort({ title: 'Management Effort', sub: 'PM / PD / Admin / Delivery Leads', rx: MGMT_RX, extra: MGMT_EXTRA, key: 'mgmt', accent: '#7C3AED' }); }
 function genTestLOE() { return genRoleEffort({ title: 'Testing Effort', sub: 'Test Manager / Lead / Analyst', rx: TEST_RX, key: 'test', accent: '#0EA5E9' }); }
 function genRoleEffort(cfg) {
   if (!isGenesis()) return '';
   const all = (resourcing.rows || []).filter(r => !resIsCarve(r));
-  const rows = all.filter(r => cfg.rx.test(r.role || ''));
+  const extra = cfg.extra || [];
+  const rows = all.filter(r => cfg.rx.test(r.role || '') || extra.includes((r.name || '').trim().toLowerCase()));
   if (!rows.length) return '';
   const mk = resMonths(); const nowKey = new Date().toISOString().slice(0, 7);
   const fmt = n => Math.round(n).toLocaleString();
   let fcTot = 0, acTot = 0, etcTot = 0;
-  const per = rows.map(r => {
+  const byName = {};
+  rows.forEach(r => {
     let fc = 0, ac = 0, fcEl = 0;
     mk.forEach(mo => { if (resFcInMonth(r, mo.key)) { const fv = +((r.forecast || {})[mo.key] || 0); fc += fv; if (mo.key <= nowKey) fcEl += fv; } if (resAcInMonth(r, mo.key)) ac += +((r.actual || {})[mo.key] || 0); });
     const etc = (r.etc != null ? r.etc : Math.max(0, fc - fcEl));
     fcTot += fc; acTot += ac; etcTot += etc;
-    return { r, fc, ac, etc };
-  }).sort((a, b) => b.fc - a.fc);
+    const nm = r.name || '—';
+    const p = byName[nm] = byName[nm] || { name: nm, role: r.role || '', domain: r.domain || '', fc21: 0, fc22: 0, fc: 0, ac: 0, etc: 0, active: r.active !== false };
+    const rel = String(r.release || ''); if (rel.includes('2.1')) p.fc21 += fc; else if (rel.includes('2.2')) p.fc22 += fc; else p.fc21 += fc;
+    p.fc += fc; p.ac += ac; p.etc += etc; if (r.active !== false) p.active = true; if (!p.role) p.role = r.role || ''; if (!p.domain) p.domain = r.domain || '';
+  });
+  const per = Object.values(byName).sort((a, b) => b.fc - a.fc);
+  const headN = per.length;
   let progFC = 0; all.forEach(r => mk.forEach(mo => { if (resFcInMonth(r, mo.key)) progFC += +((r.forecast || {})[mo.key] || 0); }));
   const pctProg = progFC > 0 ? fcTot / progFC * 100 : 0;
   const monthly = mk.map(mo => { let f = 0, a = 0; rows.forEach(r => { if (resFcInMonth(r, mo.key)) f += +((r.forecast || {})[mo.key] || 0); if (resAcInMonth(r, mo.key)) a += +((r.actual || {})[mo.key] || 0); }); return { mo, f, a }; });
@@ -3786,10 +3794,10 @@ function genRoleEffort(cfg) {
   const bars = `<div style="display:flex;align-items:flex-end;gap:8px;height:150px;padding-top:6px">${monthly.map(m => { const fh = Math.round(m.f / maxV * 130), ah = Math.round(m.a / maxV * 130); return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:5px"><div style="display:flex;align-items:flex-end;gap:3px;height:132px"><div title="forecast ${fmt(m.f)} md" style="width:13px;height:${fh}px;background:#CBD5E1;border-radius:3px 3px 0 0"></div>${m.a > 0 ? `<div title="actual ${fmt(m.a)} md" style="width:13px;height:${ah}px;background:${cfg.accent};border-radius:3px 3px 0 0"></div>` : ''}</div><div style="font-size:10px;color:#94A3B8">${m.mo.label}</div></div>`; }).join('')}</div>`;
   const kpi = (l, v, s, c) => `<div style="background:#fff;border:1px solid #EEF1F6;border-radius:14px;padding:16px 18px;flex:1;min-width:150px;box-shadow:0 1px 2px rgba(15,37,68,.04)"><div style="font-size:10.5px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:.6px">${l}</div><div style="font-size:26px;font-weight:800;color:${c || '#0F2544'};margin-top:6px">${v}</div><div style="font-size:11px;color:#64748B;margin-top:5px">${s}</div></div>`;
   const tbl = `<div class="res-card" style="border-radius:12px;margin-top:12px"><div class="res-card-title">By person</div>
-    <table class="dtable"><thead><tr><th>Name</th><th>Role</th><th>Domain</th><th>Release</th><th style="text-align:right">FC MD</th><th style="text-align:right">Act MD</th><th style="text-align:right">ETC MD</th></tr></thead><tbody>${per.map(p => `<tr><td style="font-weight:600;color:#0F2544">${p.r.name || '—'}${p.r.active === false ? ' <span style="color:#94A3B8;font-size:10px">(inactive)</span>' : ''}</td><td style="color:#64748B">${p.r.role || ''}</td><td style="color:#64748B">${p.r.domain || ''}</td><td style="color:#64748B">${p.r.release || ''}</td><td style="text-align:right">${fmt(p.fc)}</td><td style="text-align:right;color:#2563EB">${fmt(p.ac)}</td><td style="text-align:right">${fmt(p.etc)}</td></tr>`).join('')}<tr style="border-top:2px solid #E2E8F0;font-weight:800;background:#F8FAFC"><td>Total</td><td></td><td></td><td></td><td style="text-align:right">${fmt(fcTot)}</td><td style="text-align:right">${fmt(acTot)}</td><td style="text-align:right">${fmt(etcTot)}</td></tr></tbody></table></div>`;
+    <table class="dtable"><thead><tr><th>Name</th><th>Role</th><th>Domain</th><th style="text-align:right">R2.1 MD</th><th style="text-align:right">R2.2 MD</th><th style="text-align:right">Total FC</th><th style="text-align:right">Act MD</th><th style="text-align:right">ETC MD</th></tr></thead><tbody>${per.map(p => `<tr><td style="font-weight:600;color:#0F2544">${p.name}${p.active === false ? ' <span style="color:#94A3B8;font-size:10px">(inactive)</span>' : ''}</td><td style="color:#64748B">${p.role || ''}</td><td style="color:#64748B">${p.domain || ''}</td><td style="text-align:right">${fmt(p.fc21)}</td><td style="text-align:right">${fmt(p.fc22)}</td><td style="text-align:right;font-weight:600">${fmt(p.fc)}</td><td style="text-align:right;color:#2563EB">${fmt(p.ac)}</td><td style="text-align:right">${fmt(p.etc)}</td></tr>`).join('')}<tr style="border-top:2px solid #E2E8F0;font-weight:800;background:#F8FAFC"><td>Total</td><td></td><td></td><td style="text-align:right">${fmt(per.reduce((s, p) => s + p.fc21, 0))}</td><td style="text-align:right">${fmt(per.reduce((s, p) => s + p.fc22, 0))}</td><td style="text-align:right">${fmt(fcTot)}</td><td style="text-align:right">${fmt(acTot)}</td><td style="text-align:right">${fmt(etcTot)}</td></tr></tbody></table></div>`;
   const col = genChkCollapsed.has(cfg.key);
-  return `<div style="font-size:16px;font-weight:800;color:#0F2544;margin:26px 0 10px;cursor:pointer" onclick="genChkToggle('${cfg.key}')" title="Minimise / maximise"><span style="color:#94A3B8;margin-right:4px">${col ? '▸' : '▾'}</span>${cfg.title} <span style="font-size:12px;font-weight:500;color:#94A3B8">— ${cfg.sub} · ${rows.length} people</span></div>${col ? '' : `
-    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">${kpi('Headcount', rows.length, cfg.sub, cfg.accent)}${kpi('Forecast', fmt(fcTot) + ' MD', 'in window', '#0F2544')}${kpi('Actual', fmt(acTot) + ' MD', 'to date', '#2563EB')}${kpi('% of total effort', pctProg.toFixed(1) + '%', 'of ' + fmt(progFC) + ' MD total', '#0F766E')}</div>
+  return `<div style="font-size:16px;font-weight:800;color:#0F2544;margin:26px 0 10px;cursor:pointer" onclick="genChkToggle('${cfg.key}')" title="Minimise / maximise"><span style="color:#94A3B8;margin-right:4px">${col ? '▸' : '▾'}</span>${cfg.title} <span style="font-size:12px;font-weight:500;color:#94A3B8">— ${cfg.sub} · ${headN} people</span></div>${col ? '' : `
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">${kpi('Headcount', headN, cfg.sub, cfg.accent)}${kpi('Forecast', fmt(fcTot) + ' MD', 'in window', '#0F2544')}${kpi('Actual', fmt(acTot) + ' MD', 'to date', '#2563EB')}${kpi('% of total effort', pctProg.toFixed(1) + '%', 'of ' + fmt(progFC) + ' MD total', '#0F766E')}</div>
     <div class="res-card" style="border-radius:12px"><div class="res-card-title">Effort by month <span class="res-hint">grey = forecast · coloured = actual</span></div>${bars}</div>
     ${tbl}`}`;
 }

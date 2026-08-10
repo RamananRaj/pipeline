@@ -3786,7 +3786,8 @@ function genDashboardHTML() {
   let etcTot = 0;
   rows.forEach(r => { let rf = 0, rfEl = 0; mk.forEach(mo => { if (!resFcInMonth(r, mo.key)) return; const fv = +((r.forecast || {})[mo.key] || 0); rf += fv; if (mo.key <= nowKey) rfEl += fv; }); etcTot += (r.etc != null ? r.etc : Math.max(0, rf - rfEl)); });
   const varE = T.aEl - T.fEl, varPct = T.fEl > 0 ? varE / T.fEl * 100 : 0;
-  const activeCount = rows.filter(r => r.active !== false).length;
+  const activeCount = resUniq(rows.filter(r => r.active !== false));
+  const totalUniq = resUniq(rows);
   const kpi = (l, v, s, c) => `<div style="background:#fff;border:1px solid #EEF1F6;border-radius:14px;padding:16px 18px;flex:1;min-width:150px;box-shadow:0 1px 2px rgba(15,37,68,.04)"><div style="font-size:10.5px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:.6px">${l}</div><div style="font-size:26px;font-weight:800;color:${c || '#0F2544'};margin-top:6px;letter-spacing:-.01em">${v}</div><div style="font-size:11px;color:#64748B;margin-top:5px">${s}</div></div>`;
   const monthly = mk.map(mo => { let f = 0, a = 0; rows.forEach(r => { if (resFcInMonth(r, mo.key)) f += +((r.forecast || {})[mo.key] || 0); if (resAcInMonth(r, mo.key)) a += +((r.actual || {})[mo.key] || 0); }); return { mo, f, a }; });
   const maxV = Math.max(1, ...monthly.map(m => Math.max(m.f, m.a)));
@@ -3799,7 +3800,7 @@ function genDashboardHTML() {
       ${kpi('Variance to date', (varPct > 0 ? '+' : '') + varPct.toFixed(1) + '%', Math.round(varE) + ' md vs plan', Math.abs(varPct) < 5 ? '#0F2544' : varPct > 0 ? '#B45309' : '#0F766E')}
       ${kpi('Estimate to complete', fmt(etcTot), 'man-days remaining', '#0F2544')}
       ${kpi('Est. at completion', fmt(T.aEl + etcTot), Math.round(T.aEl + etcTot - T.fTot) + ' vs baseline ' + fmt(T.fTot), (T.aEl + etcTot) > T.fTot * 1.02 ? '#B45309' : '#0F766E')}
-      ${kpi('Active resources', activeCount, 'of ' + rows.length + ' total', '#0F2544')}
+      ${kpi('Active resources', activeCount, 'of ' + totalUniq + ' total', '#0F2544')}
       ${(() => { const ai = genAiStats(); const bits = Object.keys(ai.byRel).filter(r => ai.byRel[r].md > 0).map(r => `${r.replace(/^R/, '')} ${ai.pct(ai.byRel[r].md, ai.byRel[r].adj)}%`).join(' · '); return kpi('AI adoption', ai.overall + '%', bits ? 'by release: ' + bits : 'set AI % per segment in Scope', '#7C3AED'); })()}
     </div>
     <div class="res-card" style="border-radius:14px"><div class="res-card-title" onclick="genChkToggle('chart')" style="cursor:pointer" title="Minimise / maximise"><span style="color:#94A3B8;margin-right:4px">${genChkCollapsed.has('chart') ? '▸' : '▾'}</span>Forecast vs Actual by month <span class="res-hint">grey = forecast · blue = actual (timesheet upload)</span></div>${genChkCollapsed.has('chart') ? '' : bars}</div>
@@ -4356,6 +4357,8 @@ function isGenesis() { return ORG === 'GENESIS'; }
 function resMonths() {
   return GMONTHS.map(g => ({ key: g.y + '-' + String(g.m + 1).padStart(2, '0'), label: g.label }));
 }
+/** Distinct headcount by person name (so one person split across releases/domains counts once). */
+function resUniq(list) { return new Set((list || []).map(r => (r.name || '').trim().toLowerCase()).filter(Boolean)).size; }
 /** Forecast counts wherever planned, up to (not including) the end date. Start date does NOT gate forecast. */
 function resFcInMonth(r, key) {
   if (r.inactiveFrom && key >= String(r.inactiveFrom).slice(0, 7)) return false;
@@ -4498,7 +4501,8 @@ function renderResourcingView() {
   }).join('') || `<tr><td colspan="6" style="text-align:center;color:#94A3B8;padding:14px">No forecast yet.</td></tr>`;
 
   const nowKey = new Date().toISOString().slice(0, 7);
-  const activeCount = rows.filter(r => r.active !== false).length;
+  const activeCount = resUniq(rows.filter(r => r.active !== false));
+  const totalUniq = resUniq(rows);
   let etcTot = 0;
   const metrics = rows.map((r, idx) => {
     let rf = 0, ra = 0, rot = 0, rfEl = 0; T.mk.forEach(mo => { if (resFcInMonth(r, mo.key)) { const fv = +((r.forecast || {})[mo.key] || 0); rf += fv; if (mo.key <= nowKey) rfEl += fv; } if (resAcInMonth(r, mo.key)) { ra += +((r.actual || {})[mo.key] || 0); rot += +((r.overtime || {})[mo.key] || 0); } });
@@ -4579,7 +4583,7 @@ function renderResourcingView() {
       ${kpi('Variance to date', (varPct > 0 ? '+' : '') + varPct.toFixed(1) + '%', Math.round(varE) + ' md vs plan', Math.abs(varPct) < 5 ? '#0F2544' : varPct > 0 ? '#B45309' : '#0F766E')}
       ${kpi('Estimate to complete', fmt(etcTot), 'man-days remaining to finish', '#0F2544')}
       ${kpi('Est. at completion', fmt(T.aEl + etcTot), (T.aEl + etcTot - T.fTot >= 0 ? '+' : '') + Math.round(T.aEl + etcTot - T.fTot) + ' vs baseline ' + fmt(T.fTot), (T.aEl + etcTot) > T.fTot * 1.02 ? '#B45309' : '#0F766E')}
-      ${kpi('Active resources', activeCount, 'of ' + rows.length + ' total' + (rows.length - activeCount ? ' · ' + (rows.length - activeCount) + ' inactive' : ''), '#0F2544')}
+      ${kpi('Active resources', activeCount, 'of ' + totalUniq + ' total' + (totalUniq - activeCount ? ' · ' + (totalUniq - activeCount) + ' inactive' : ''), '#0F2544')}
     </div>
     <div class="res-card" style="border-radius:14px"><div class="res-card-title" onclick="resToggleSec('bars')" style="cursor:pointer">${resSecChevron('bars')}Forecast vs Actual by month
       <span class="res-hint">grey = forecast · blue = actual (timesheet upload)</span></div>${resCollapsed.has('bars') ? '' : bars}</div>
@@ -5573,7 +5577,7 @@ function genReportBody() {
   let etcTot = 0;
   rows.forEach(r => { let rf = 0, rfEl = 0; mk.forEach(mo => { if (!resFcInMonth(r, mo.key)) return; const fv = +((r.forecast || {})[mo.key] || 0); rf += fv; if (mo.key <= nowKey) rfEl += fv; }); etcTot += (r.etc != null ? r.etc : Math.max(0, rf - rfEl)); });
   const varE = T.aEl - T.fEl, varPct = T.fEl > 0 ? varE / T.fEl * 100 : 0;
-  const activeCount = rows.filter(r => r.active !== false).length;
+  const activeCount = resUniq(rows.filter(r => r.active !== false));
   const segs = (scope.segments || []).filter(s => s.release === rel);
   let sMd = 0, sAdj = 0, sSt = 0;
   segs.forEach(seg => { const b = scDomsMD((scope.domainMap || {})[seg.name] || []).fc; sMd += b; sAdj += b * (1 - (+seg.ai || 0) / 100); (seg.themes || []).forEach(t => sSt += (+t.stories || 0)); });

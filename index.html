@@ -3744,7 +3744,7 @@ function genPR107726Summary() {
   const head = resUniq(carve);
   const kpi = (l, v, s, c) => `<div style="background:#fff;border:1px solid #EEF1F6;border-radius:14px;padding:16px 18px;flex:1;min-width:150px;box-shadow:0 1px 2px rgba(15,37,68,.04)"><div style="font-size:10.5px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:.6px">${l}</div><div style="font-size:26px;font-weight:800;color:${c || '#0F2544'};margin-top:6px">${v}</div><div style="font-size:11px;color:#64748B;margin-top:5px">${s}</div></div>`;
   const col = genChkCollapsed.has('pr107726');
-  return `<div style="font-size:16px;font-weight:800;color:#0F2544;margin:26px 0 10px;cursor:pointer" onclick="genChkToggle('pr107726')" title="Minimise / maximise"><span style="color:#94A3B8;margin-right:4px">${col ? '▸' : '▾'}</span>PR107726 — reported separately <span style="font-size:12px;font-weight:500;color:#94A3B8">— CRM · Sales · CPQ &amp; EPC · ${head} people · excluded from the headline totals above</span></div>${col ? '' : `
+  return `<div style="font-size:16px;font-weight:800;color:#0F2544;margin:26px 0 10px;cursor:pointer" onclick="genChkToggle('pr107726')" title="Minimise / maximise"><span style="color:#94A3B8;margin-right:4px">${col ? '▸' : '▾'}</span>CRM — tracked separately <span style="font-size:12px;font-weight:500;color:#94A3B8">— excluded from the headline totals above · ${head} people</span></div>${col ? '' : `
     <div style="display:flex;gap:12px;flex-wrap:wrap">${kpi('Forecast', fmt(fc) + ' MD', 'R2.1 ' + fmt(f21) + ' · R2.2 ' + fmt(f22), '#0F2544')}${kpi('Actual to date', fmt(ac) + ' MD', '', '#2563EB')}${kpi('Estimate to complete', fmt(etc) + ' MD', 'R2.1 ' + fmt(e21) + ' · R2.2 ' + fmt(e22), '#0F2544')}${kpi('Headcount', head, 'unique people', '#0F2544')}</div>`}`;
 }
 function genSupportSummary() {
@@ -3816,6 +3816,7 @@ function genDashboardHTML() {
   const fmt = n => Math.round(n).toLocaleString();
   const mk = resMonths(); const nowKey = new Date().toISOString().slice(0, 7); const rows = (resourcing.rows || []).filter(r => !resIsCarve(r));
   const T = resTotals(rows);
+  let carveFC = 0; (resourcing.rows || []).filter(resIsCarve).forEach(r => mk.forEach(mo => { if (resFcInMonth(r, mo.key)) carveFC += +((r.forecast || {})[mo.key] || 0); }));
   let etcTot = 0, etc21 = 0, etc22 = 0;
   rows.forEach(r => { let rf = 0, rfEl = 0; mk.forEach(mo => { if (!resFcInMonth(r, mo.key)) return; const fv = +((r.forecast || {})[mo.key] || 0); rf += fv; if (mo.key <= nowKey) rfEl += fv; }); const e = (r.etc != null ? r.etc : Math.max(0, rf - rfEl)); etcTot += e; const rel = String(r.release || ''); if (rel.includes('2.1')) etc21 += e; else if (rel.includes('2.2')) etc22 += e; });
   const varE = T.aEl - T.fEl, varPct = T.fEl > 0 ? varE / T.fEl * 100 : 0;
@@ -3828,7 +3829,7 @@ function genDashboardHTML() {
   return `
     <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:18px"><div><div style="font-size:20px;font-weight:800;color:#0F2544">Genesis — Programme Dashboard</div><div style="font-size:12px;color:#64748B;margin-top:2px">Resourcing forecast vs actual &amp; resource pool by domain</div></div><input id="resSearchInput" value="${resSearch.replace(/"/g, '&quot;')}" oninput="resSetSearch(this.value)" placeholder="🔍 Search name…" style="padding:6px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:12px;min-width:160px"></div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px">
-      ${kpi('Forecast (total)', fmt(T.fTot), 'man-days in window', '#0F2544')}
+      ${kpi('Forecast (total)', fmt(T.fTot), carveFC > 0 ? 'excl. CRM · + ' + fmt(carveFC) + ' CRM (separate) = ' + fmt(T.fTot + carveFC) + ' all-in' : 'man-days in window', '#0F2544')}
       ${kpi('Actual to date', fmt(T.aEl), 'of ' + fmt(T.fEl) + ' planned (elapsed)', '#2563EB')}
       ${kpi('Variance to date', (varPct > 0 ? '+' : '') + varPct.toFixed(1) + '%', Math.round(varE) + ' md vs plan', Math.abs(varPct) < 5 ? '#0F2544' : varPct > 0 ? '#B45309' : '#0F766E')}
       ${kpi('Estimate to complete', fmt(etcTot), (etc21 + etc22 > 0 ? 'R2.1 ' + fmt(etc21) + ' · R2.2 ' + fmt(etc22) : 'man-days remaining'), '#0F2544')}
@@ -4500,9 +4501,9 @@ function resReportMatch(r) { return resReport === 'all' || String(r.report || ''
 function resReleaseList() { return [...new Set((resourcing.rows || []).map(r => String(r.release || '').trim()).filter(Boolean))].sort(); }
 function resReportList() { return [...new Set((resourcing.rows || []).map(r => String(r.report || '').trim()).filter(Boolean))].sort(); }
 function resReleaseRows() { return (resourcing.rows || []).filter(r => resReleaseMatch(r) && resReportMatch(r)); }
-// Dashboard carve-out: PR107726 is reported as its own section, excluded from the headline totals
+// Dashboard carve-out: CRM is tracked separately — excluded from headline totals, shown in its own section
 const RES_CARVE = /pr107726/i;
-function resIsCarve(r) { return RES_CARVE.test(String(r.report || '')); }
+function resIsCarve(r) { return String(r.domain || '').trim().toLowerCase() === 'crm' || RES_CARVE.test(String(r.report || '')); }
 function resSetRelease(v) { resRelease = v; renderResourcingView(); }
 function resSetReport(v) { resReport = v; renderResourcingView(); }
 function resTotals(srcRows) {

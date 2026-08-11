@@ -4844,6 +4844,10 @@ function resImport(mode) {
 }
 /** Wipe only the actuals (keep the roster & forecast) — used by Replace-actuals for the weekly file. */
 function resActualsClear() { (resourcing.rows || []).forEach(r => { r.actual = {}; r.actualWk = {}; r.overtime = {}; }); }
+// Preserve loaded actuals across a Forecast re-import (which rebuilds the rows). Snapshot by person name.
+function resSnapshotActuals() { const s = {}; (resourcing.rows || []).forEach(r => { const k = (r.name || '').trim().toLowerCase(); if (!k) return; const hasA = (r.actual && Object.keys(r.actual).length) || (r.actualWk && Object.keys(r.actualWk).length); if (hasA && !s[k]) s[k] = { actual: r.actual || {}, actualWk: r.actualWk || {}, overtime: r.overtime || {} }; }); return s; }
+function resRestoreActuals(snap) { if (!snap) return; const used = {}; (resourcing.rows || []).forEach(r => { const k = (r.name || '').trim().toLowerCase(); if (snap[k] && !used[k]) { r.actual = snap[k].actual; r.actualWk = snap[k].actualWk; r.overtime = snap[k].overtime; used[k] = true; } }); }
+function _resImportForecastKeepActuals(arr, wipe) { const snap = resSnapshotActuals(); if (wipe) resourcing.rows = []; _resMapImport(arr, 'forecast'); resRestoreActuals(snap); persistResourcing(); renderResourcingView(); }
 /** Ask whether to merge or replace before mapping the parsed rows. Replace means different things for forecast vs actual. */
 function resAskImportMode(arr, mode) {
   const existing = (resourcing.rows || []).length;
@@ -4868,8 +4872,8 @@ function resAskImportMode(arr, mode) {
     ] }
   ], 'Continue', v => {
     if (v.imode === 'replace') {
-      uiConfirm('Replace all resources?', 'This deletes all ' + existing + ' resources in ' + ORG + ' and loads only what is in the file. This can only be undone from Cloud Sync history. Continue?', () => { resourcing.rows = []; _resMapImport(arr, mode); }, 'Replace all');
-    } else { _resMapImport(arr, mode); }
+      uiConfirm('Replace all resources?', 'This deletes all ' + existing + ' resources in ' + ORG + ' and loads the file. Existing actuals are preserved and re-attached by name. Continue?', () => { _resImportForecastKeepActuals(arr, true); }, 'Replace all');
+    } else { _resImportForecastKeepActuals(arr, false); }
   });
 }
 /** Export everything to one workbook: Summary (FC/Act/ETC/OT) + Forecast + Actual month sheets. */

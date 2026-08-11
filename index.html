@@ -3811,6 +3811,20 @@ function genAiStats() {
   const pct = (md, adj) => md > 0 ? Math.round((md - adj) / md * 100) : 0;
   return { overall: pct(tMd, tAdj), tMd, byRel, pct };
 }
+/** Month-by-month Forecast vs Actual trend as a line graph (SVG). monthly = [{mo:{label}, f, a}]. */
+function genTrendLine(monthly) {
+  const n = monthly.length; if (!n) return '';
+  const W = Math.max(600, n * 78), H = 210, padL = 44, padR = 14, padT = 16, padB = 30;
+  const fmt = v => Math.round(v).toLocaleString();
+  const maxV = Math.max(1, ...monthly.map(m => Math.max(m.f, m.a)));
+  const X = i => padL + (n > 1 ? i * (W - padL - padR) / (n - 1) : 0);
+  const Y = v => H - padB - (v / maxV) * (H - padT - padB);
+  const grid = [0, .25, .5, .75, 1].map(t => { const y = Y(maxV * t); return `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="#EEF1F6"/><text x="${padL - 6}" y="${y + 3}" font-size="9" fill="#94A3B8" text-anchor="end">${fmt(maxV * t)}</text>`; }).join('');
+  const series = (key, col, dash) => { const pts = monthly.map((m, i) => X(i) + ',' + Y(m[key])).join(' '); const dots = monthly.map((m, i) => m[key] > 0 || key === 'f' ? `<circle cx="${X(i)}" cy="${Y(m[key])}" r="3" fill="${col}"><title>${m.mo.label}: ${fmt(m[key])} md</title></circle>` : '').join(''); return `<polyline points="${pts}" fill="none" stroke="${col}" stroke-width="2.5" ${dash ? 'stroke-dasharray="5 4"' : ''}/>${dots}`; };
+  const labels = monthly.map((m, i) => `<text x="${X(i)}" y="${H - 10}" font-size="10" fill="#64748B" text-anchor="middle">${m.mo.label}</text>`).join('');
+  return `<div style="overflow-x:auto;margin-top:12px"><svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;font-family:inherit">${grid}${series('f', '#94A3B8', true)}${series('a', '#2563EB', false)}${labels}</svg></div>
+    <div style="font-size:11px;color:#64748B;margin-top:4px"><span style="color:#94A3B8">— —</span> forecast &nbsp;·&nbsp; <span style="color:#2563EB">———</span> actual (month by month)</div>`;
+}
 /** Genesis Dashboard — Resourcing Forecast vs Actual summary + by-Domain pool (no AAR utilisation). */
 function genDashboardHTML() {
   const fmt = n => Math.round(n).toLocaleString();
@@ -3837,7 +3851,7 @@ function genDashboardHTML() {
       ${kpi('Active resources', activeCount, 'of ' + totalUniq + ' total', '#0F2544')}
       ${(() => { const ai = genAiStats(); const bits = Object.keys(ai.byRel).filter(r => ai.byRel[r].md > 0).map(r => `${r.replace(/^R/, '')} ${ai.pct(ai.byRel[r].md, ai.byRel[r].adj)}%`).join(' · '); return kpi('AI adoption', ai.overall + '%', bits ? 'by release: ' + bits : 'set AI % per segment in Scope', '#7C3AED'); })()}
     </div>
-    <div class="res-card" style="border-radius:14px"><div class="res-card-title" onclick="genChkToggle('chart')" style="cursor:pointer" title="Minimise / maximise"><span style="color:#94A3B8;margin-right:4px">${genChkCollapsed.has('chart') ? '▸' : '▾'}</span>Forecast vs Actual by month <span class="res-hint">grey = forecast · blue = actual (timesheet upload)</span></div>${genChkCollapsed.has('chart') ? '' : bars}</div>
+    <div class="res-card" style="border-radius:14px"><div class="res-card-title" onclick="genChkToggle('chart')" style="cursor:pointer" title="Minimise / maximise"><span style="color:#94A3B8;margin-right:4px">${genChkCollapsed.has('chart') ? '▸' : '▾'}</span>Forecast vs Actual by month <span class="res-hint">bars = monthly · line = trend · grey/dashed = forecast · blue = actual</span></div>${genChkCollapsed.has('chart') ? '' : bars + genTrendLine(monthly)}</div>
     ${genDomainPoolPanel()}
     ${genValidationHTML()}
     ${genMgmtLOE()}
@@ -4644,7 +4658,7 @@ function renderResourcingView() {
       ${kpi('Active resources', activeCount, 'of ' + totalUniq + ' total' + (totalUniq - activeCount ? ' · ' + (totalUniq - activeCount) + ' inactive' : ''), '#0F2544')}
     </div>
     <div class="res-card" style="border-radius:14px"><div class="res-card-title" onclick="resToggleSec('bars')" style="cursor:pointer">${resSecChevron('bars')}Forecast vs Actual by month
-      <span class="res-hint">grey = forecast · blue = actual (timesheet upload)</span></div>${resCollapsed.has('bars') ? '' : bars}</div>
+      <span class="res-hint">bars = monthly · line = trend · grey/dashed = forecast · blue = actual</span></div>${resCollapsed.has('bars') ? '' : bars + genTrendLine(monthly)}</div>
     <div class="res-card" style="border-radius:14px"><div class="res-card-title" onclick="resToggleSec('domain')" style="cursor:pointer">${resSecChevron('domain')}By domain — elapsed period</div>${resCollapsed.has('domain') ? '' : `
       <table class="dtable"><thead><tr><th>Domain</th><th style="text-align:right">Forecast</th><th style="text-align:right">Actual</th><th style="text-align:right">Variance</th><th style="text-align:right">OT</th><th style="text-align:right">Full FC</th></tr></thead><tbody>${domRows}</tbody></table>`}</div>
     ${resGrid ? resGridHTML() : `<div class="res-card" style="border-radius:14px"><div class="res-card-title" onclick="resToggleSec('list')" style="cursor:pointer">${resSecChevron('list')}Resources <span class="res-hint">click a name to edit · <span style="color:#2563EB">▸ Weekly</span> to enter forecast hours by week</span>${resSelected.size ? `<span style="float:right;display:inline-flex;align-items:center;gap:8px;font-size:12px"><span style="color:#0F2544;font-weight:700">${resSelected.size} selected</span><button onclick="event.stopPropagation();resOpenBulk()" style="background:#0F2544;color:#fff;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-weight:600;font-size:11px">Bulk update</button><button onclick="event.stopPropagation();resClearSel()" title="Unselect all — does not delete anything" style="background:#F1F5F9;color:#475569;border:none;padding:5px 10px;border-radius:8px;cursor:pointer;font-size:11px">Deselect all</button></span>` : ''}</div>${resCollapsed.has('list') ? '' : `

@@ -5809,23 +5809,51 @@ function reportCopyHTML() {
 // ═══════════════════════════════════════════════════════════════════════════
 const GOV_RAGC = { Red: '#DC2626', Amber: '#F59E0B', Green: '#16A34A' };
 function govRag(p, i) { const s = { L: 1, M: 2, H: 3 }; const v = (s[p] || 0) * (s[i] || 0); return v >= 6 ? 'Red' : v >= 3 ? 'Amber' : 'Green'; }
-function govCrMd(c) { return c.md != null ? c.md : (governance.complexity[c.complexity] || 0); }
+function govCrMd(c) { return c.days != null ? c.days : (c.md != null ? c.md : (governance.complexity[c.complexity] || 0)); }
 function govSetComplexity(t, v) { governance.complexity[t] = Math.max(0, +v || 0); persistGovernance(); renderGovernance(); }
 function govCRopen(id) {
   const c = id ? governance.crs.find(x => x.id === id) : null;
+  const num = x => { const t = String(x).trim(); return t === '' ? null : (isNaN(+t) ? null : +t); };
   uiModal(id ? 'Edit change request' : 'New change request', [
+    { id: 'ref', label: 'CR ref', value: (c && c.ref) || '', placeholder: 'e.g. CR064' },
     { id: 'title', label: 'Title', value: (c && c.title) || '' },
-    { id: 'area', label: 'Impacted area(s)', value: (c && c.area) || '', placeholder: 'e.g. Billing, CRM' },
-    { id: 'complexity', label: 'Complexity (drives estimate)', type: 'select', value: (c && c.complexity) || 'M', options: [['S', 'S — Small (' + (governance.complexity.S || 0) + ' MD)'], ['M', 'M — Medium (' + (governance.complexity.M || 0) + ' MD)'], ['L', 'L — Large (' + (governance.complexity.L || 0) + ' MD)'], ['XL', 'XL — Very large (' + (governance.complexity.XL || 0) + ' MD)']] },
+    { id: 'value', label: 'Value ($)', type: 'number', value: (c && c.value != null) ? c.value : '' },
+    { id: 'days', label: 'Days (effort MD)', type: 'number', value: (c && c.days != null) ? c.days : '' },
+    { id: 'build', label: 'Build only', type: 'number', value: (c && c.build != null) ? c.build : '' },
+    { id: 'g2', label: 'G2', type: 'number', value: (c && c.g2 != null) ? c.g2 : '' },
+    { id: 'sf', label: 'SF', type: 'number', value: (c && c.sf != null) ? c.sf : '' },
     { id: 'status', label: 'Status', type: 'select', value: (c && c.status) || 'Raised', options: [['Raised', 'Raised'], ['Assessing', 'Assessing'], ['Approved', 'Approved'], ['Rejected', 'Rejected'], ['Implemented', 'Implemented']] },
     { id: 'owner', label: 'Owner', value: (c && c.owner) || '' },
-    { id: 'notes', label: 'Impact assessment / notes', value: (c && c.notes) || '' }
+    { id: 'notes', label: 'Notes', value: (c && c.notes) || '' }
   ], 'Save', v => {
     if (!v.title.trim()) return;
-    if (c) { Object.assign(c, { title: v.title.trim(), area: v.area.trim(), complexity: v.complexity, status: v.status, owner: v.owner.trim(), notes: v.notes.trim() }); }
-    else { governance.crs.push({ id: rmId(), ref: 'CR-' + String(governance.crs.length + 1).padStart(3, '0'), title: v.title.trim(), area: v.area.trim(), complexity: v.complexity, status: v.status, owner: v.owner.trim(), notes: v.notes.trim(), raised: new Date().toISOString().slice(0, 10) }); }
+    const patch = { ref: v.ref.trim(), title: v.title.trim(), value: num(v.value), days: num(v.days), build: num(v.build), g2: num(v.g2), sf: num(v.sf), status: v.status, owner: v.owner.trim(), notes: v.notes.trim() };
+    if (c) { Object.assign(c, patch); }
+    else { governance.crs.push(Object.assign({ id: rmId(), ref: patch.ref || 'CR-' + String(governance.crs.length + 1).padStart(3, '0'), raised: new Date().toISOString().slice(0, 10) }, patch)); }
     persistGovernance(); renderGovernance();
   });
+}
+function govCRseed() {
+  const d = [
+    ['CR064', 'Inclusion of Rolling Credits', 174159.88, 77.40, 33, 13, 15],
+    ['CR066', 'Make email non-mandatory for assisted journeys', 42654.92, 23.04, 6, null, 6],
+    ['CR067', 'Genesis specific bill data file updates', 74334.31, 40.32, 10, 10, null],
+    ['CR068', 'Aggregation of work items', 37742.80, 20.16, 5, 5, null],
+    ['CR069', 'Validate Account Name Entry', null, null, null, null, null],
+    ['CR070', 'Customer Status', 102924.43, 54.72, 16, 8, 8],
+    ['CR072', 'R2 Additional storage of g2 files to Fileshare', 25759.90, 14.40, 4, 4, null],
+    ['CR073', 'WINZ Referral', 72837.65, 38.90, 10, null, 10],
+    ['CR074', 'Multiple Case Templates required within g2', 146220.24, 77.47, 27, null, 27],
+    ['CR075', 'Re-assign Field Service Orders if FSO has not been submitted', 79534.28, 43.20, 12, 12, null],
+    ['CR076', 'Switching access to Stop Service greater than 90 Days in the past', 16175.48, 8.64, 2, null, 2],
+    ['CR077', 'Cancel Vacant Disconnection upon start service order', 82374.08, 44.64, 13, 7, 6],
+    ['CR078', 'Letters needing to be manually sent from CRM in r2', 61094.59, 33.12, 9, null, 9],
+    ['CR080', 'Multi Service Home Move', 16175.48, 8.64, 2, null, 2],
+    ['CR079', 'Bulk MEP Nominations', 38721.38, 30.24, 5, 5, null]
+  ];
+  const have = new Set((governance.crs || []).map(c => (c.ref || '').toLowerCase()));
+  let n = 0; d.forEach(([ref, title, value, days, build, g2, sf]) => { if (have.has(ref.toLowerCase())) return; governance.crs.push({ id: rmId(), ref, title, value, days, build, g2, sf, status: 'Raised', owner: '', notes: '', raised: new Date().toISOString().slice(0, 10) }); n++; });
+  persistGovernance(); renderGovernance();
 }
 function govCRdel(id) { uiConfirm('Delete change request', 'Remove this CR?', () => { governance.crs = governance.crs.filter(x => x.id !== id); persistGovernance(); renderGovernance(); }); }
 function govRiskOpen(id) {
@@ -5861,7 +5889,9 @@ function renderGovernance() {
   const stC = { Raised: ['#FEF3C7', '#B45309'], Assessing: ['#DBEAFE', '#1D4ED8'], Approved: ['#DCFCE7', '#15803D'], Rejected: ['#F1F5F9', '#94A3B8'], Implemented: ['#E0E7FF', '#4338CA'], Open: ['#FEE2E2', '#B91C1C'], Mitigating: ['#FEF3C7', '#B45309'], Closed: ['#DCFCE7', '#15803D'] };
   const badge = (t, bg, fg) => `<span style="background:${bg};color:${fg};font-size:10px;font-weight:700;border-radius:8px;padding:2px 8px">${t}</span>`;
   const del = fn => `<button onclick="${fn}" title="Remove" style="border:none;background:none;color:#CBD5E1;cursor:pointer;font-size:15px" onmouseover="this.style.color='#DC2626'" onmouseout="this.style.color='#CBD5E1'">×</button>`;
-  const crRows = governance.crs.length ? governance.crs.map(c => { const st = stC[c.status] || ['#F1F5F9', '#64748B']; return `<tr><td onclick="govCRopen(${c.id})" style="cursor:pointer;font-weight:600">${c.ref || ''}</td><td onclick="govCRopen(${c.id})" style="cursor:pointer">${c.title}</td><td style="color:#64748B">${c.area || '—'}</td><td style="text-align:center">${c.complexity}</td><td style="text-align:right;font-weight:600">${fmt(govCrMd(c))}</td><td>${badge(c.status, st[0], st[1])}</td><td style="color:#64748B">${c.owner || '—'}</td><td style="text-align:center">${del('govCRdel(' + c.id + ')')}</td></tr>`; }).join('') : `<tr><td colspan="8" style="text-align:center;color:#94A3B8;padding:14px">No change requests yet — <strong>+ New CR</strong>.</td></tr>`;
+  const money = v => v == null ? '—' : '$' + Math.round(v).toLocaleString();
+  const nc = v => v == null ? '<span style="color:#CBD5E1">—</span>' : (Math.round(v * 100) / 100).toLocaleString();
+  const crRows = governance.crs.length ? governance.crs.map(c => { const st = stC[c.status] || ['#F1F5F9', '#64748B']; return `<tr><td onclick="govCRopen(${c.id})" style="cursor:pointer;font-weight:600">${c.ref || ''}</td><td onclick="govCRopen(${c.id})" style="cursor:pointer">${c.title}</td><td style="text-align:right;color:#64748B">${money(c.value)}</td><td style="text-align:right;font-weight:600">${nc(c.days)}</td><td style="text-align:right">${nc(c.build)}</td><td style="text-align:right">${nc(c.g2)}</td><td style="text-align:right">${nc(c.sf)}</td><td>${badge(c.status, st[0], st[1])}</td><td style="color:#64748B">${c.owner || '—'}</td><td style="text-align:center">${del('govCRdel(' + c.id + ')')}</td></tr>`; }).join('') : `<tr><td colspan="10" style="text-align:center;color:#94A3B8;padding:14px">No change requests yet — <strong>+ New CR</strong> or <strong>Load CR list</strong>.</td></tr>`;
   const riskRows = governance.risks.length ? governance.risks.map(r => { const rag = govRag(r.prob, r.impact); const st = stC[r.status] || ['#F1F5F9', '#64748B']; return `<tr><td onclick="govRiskOpen(${r.id})" style="cursor:pointer;font-weight:600">${r.ref || ''}</td><td onclick="govRiskOpen(${r.id})" style="cursor:pointer">${r.title}${r.impacted ? `<div style="font-size:10px;color:#94A3B8">impacts: ${r.impacted}</div>` : ''}</td><td>${r.type}</td><td style="color:#64748B">${r.phase || '—'}</td><td style="text-align:center">${r.prob}×${r.impact}</td><td>${badge(rag, rag === 'Red' ? '#FEE2E2' : rag === 'Amber' ? '#FEF3C7' : '#DCFCE7', GOV_RAGC[rag])}</td><td>${badge(r.status, st[0], st[1])}</td><td style="color:#64748B">${r.owner || '—'}</td><td style="text-align:center">${del('govRiskDel(' + r.id + ')')}</td></tr>`; }).join('') : `<tr><td colspan="9" style="text-align:center;color:#94A3B8;padding:14px">No risks or issues yet — <strong>+ New</strong>.</td></tr>`;
   el.innerHTML = `
     <div style="font-size:20px;font-weight:800;color:#0F2544;margin-bottom:4px">Governance</div>
@@ -5874,8 +5904,8 @@ function renderGovernance() {
     </div>
     <div class="res-card" style="border-radius:12px"><div class="res-card-title">Complexity matrix <span class="res-hint">Genesis-only · man-days per CR complexity (drives the estimate)</span></div>
       <div style="display:flex;gap:22px;flex-wrap:wrap;padding:4px 2px">${matrix}</div></div>
-    <div class="res-card" style="border-radius:12px"><div class="res-card-title">Change Requests<button onclick="govCRopen(0)" style="float:right;background:#0F2544;color:#fff;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-weight:600;font-size:11px">＋ New CR</button></div>
-      <table class="dtable"><thead><tr><th>Ref</th><th>Title</th><th>Area</th><th style="text-align:center">Cx</th><th style="text-align:right">Est MD</th><th>Status</th><th>Owner</th><th></th></tr></thead><tbody>${crRows}</tbody></table></div>
+    <div class="res-card" style="border-radius:12px"><div class="res-card-title">Change Requests<span style="float:right;display:inline-flex;gap:6px"><button onclick="govCRseed()" title="Load the CR list (CR064–CR080)" style="background:#F1F5F9;color:#475569;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-weight:600;font-size:11px">Load CR list</button><button onclick="govCRopen(0)" style="background:#0F2544;color:#fff;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-weight:600;font-size:11px">＋ New CR</button></span></div>
+      <table class="dtable"><thead><tr><th>Ref</th><th>Title</th><th style="text-align:right">Value</th><th style="text-align:right">Days</th><th style="text-align:right">Build only</th><th style="text-align:right">G2</th><th style="text-align:right">SF</th><th>Status</th><th>Owner</th><th></th></tr></thead><tbody>${crRows}</tbody></table></div>
     <div class="res-card" style="border-radius:12px"><div class="res-card-title">Risks &amp; Issues<button onclick="govRiskOpen(0)" style="float:right;background:#0F2544;color:#fff;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-weight:600;font-size:11px">＋ New</button></div>
       <table class="dtable"><thead><tr><th>Ref</th><th>Title</th><th>Type</th><th>Phase</th><th style="text-align:center">P×I</th><th>RAG</th><th>Status</th><th>Owner</th><th></th></tr></thead><tbody>${riskRows}</tbody></table></div>`;
 }

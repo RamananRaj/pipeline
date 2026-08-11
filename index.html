@@ -3832,6 +3832,20 @@ function genKpiInfo() {
   w.onclick = e => { if (e.target === w) w.remove(); };
   document.body.appendChild(w);
 }
+/** Monthly breakdown table: Forecast / Actual / Variance + running Spent & Remaining (EAC build). */
+function genMonthlyTable(monthly, nowKey) {
+  const fmt = n => Math.round(n).toLocaleString();
+  let cumA = 0, remain = monthly.reduce((s, m) => s + m.f, 0);
+  const rows = monthly.map(m => {
+    const elapsed = m.mo.key <= nowKey;
+    cumA += m.a; remain -= m.f;
+    const dv = elapsed ? m.a - m.f : null;
+    const col = dv == null ? '#94A3B8' : Math.abs(dv) < 0.5 ? '#64748B' : dv > 0 ? '#B45309' : '#0F766E';
+    return `<tr${m.mo.key === nowKey ? ' style="background:#EFF6FF"' : ''}><td style="font-weight:600">${m.mo.label}${m.mo.key === nowKey ? ' <span style="font-size:9px;color:#2563EB;font-weight:800">◀ now</span>' : ''}</td><td style="text-align:right">${fmt(m.f)}</td><td style="text-align:right;color:#2563EB">${elapsed ? fmt(m.a) : '—'}</td><td style="text-align:right;color:${col}">${dv == null ? '—' : (dv > 0 ? '+' : '') + fmt(dv)}</td><td style="text-align:right;color:#64748B">${fmt(cumA)}</td><td style="text-align:right;color:#64748B">${fmt(Math.max(0, remain))}</td></tr>`;
+  }).join('');
+  const tf = monthly.reduce((s, m) => s + m.f, 0), ta = monthly.reduce((s, m) => s + m.a, 0);
+  return `<table class="dtable" style="margin-top:12px"><thead><tr><th>Month</th><th style="text-align:right">Forecast</th><th style="text-align:right">Actual</th><th style="text-align:right">Variance</th><th style="text-align:right">Cum. actual</th><th style="text-align:right">Remaining (ETC)</th></tr></thead><tbody>${rows}<tr style="border-top:2px solid #E2E8F0;font-weight:800;background:#F8FAFC"><td>Total</td><td style="text-align:right">${fmt(tf)}</td><td style="text-align:right">${fmt(ta)}</td><td style="text-align:right">${(ta - tf > 0 ? '+' : '') + fmt(ta - tf)}</td><td style="text-align:right">${fmt(ta)}</td><td style="text-align:right">—</td></tr></tbody></table>`;
+}
 /** Month-by-month Forecast vs Actual trend as a line graph (SVG). monthly = [{mo:{label}, f, a}]. */
 function genTrendLine(monthly) {
   const n = monthly.length; if (!n) return '';
@@ -3873,6 +3887,7 @@ function genDashboardHTML() {
       ${(() => { const ai = genAiStats(); const bits = Object.keys(ai.byRel).filter(r => ai.byRel[r].md > 0).map(r => `${r.replace(/^R/, '')} ${ai.pct(ai.byRel[r].md, ai.byRel[r].adj)}%`).join(' · '); return kpi('AI adoption', ai.overall + '%', bits ? 'by release: ' + bits : 'set AI % per segment in Scope', '#7C3AED'); })()}
     </div>
     <div class="res-card" style="border-radius:14px"><div class="res-card-title" onclick="genChkToggle('chart')" style="cursor:pointer" title="Minimise / maximise"><span style="color:#94A3B8;margin-right:4px">${genChkCollapsed.has('chart') ? '▸' : '▾'}</span>Forecast vs Actual by month <span class="res-hint">bars = monthly · line = trend · grey/dashed = forecast · blue = actual</span></div>${genChkCollapsed.has('chart') ? '' : bars + genTrendLine(monthly)}</div>
+    <div class="res-card" style="border-radius:14px"><div class="res-card-title" onclick="genChkToggle('montbl')" style="cursor:pointer" title="Minimise / maximise"><span style="color:#94A3B8;margin-right:4px">${genChkCollapsed.has('montbl') ? '▸' : '▾'}</span>Monthly breakdown <span class="res-hint">Forecast · Actual · Variance · cumulative actual &amp; remaining (ETC) — excl. CRM</span></div>${genChkCollapsed.has('montbl') ? '' : genMonthlyTable(monthly, nowKey)}</div>
     ${genDomainPoolPanel()}
     ${genValidationHTML()}
     ${genMgmtLOE()}

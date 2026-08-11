@@ -3820,7 +3820,8 @@ function genKpiInfo() {
     <p style="margin:0 0 8px"><b>Forecast (total)</b> = sum of every resource's monthly forecast man-days across the window (weekly/monthly hours ÷ 7.5). It <b>includes all delivery groups</b>: Management, Build, Testing, Business Analyst, Architecture, DM/D&amp;A and NFR/Platform.</p>
     <p style="margin:0 0 8px"><b>CRM is excluded</b> from the headline — it's tracked separately. The subtext shows it as "+ CRM (separate)" and it has its own section lower down.</p>
     <p style="margin:0 0 8px"><b>Actual to date</b> = timesheet actuals loaded for elapsed months. <b>Variance to date</b> = actual − forecast-to-date (elapsed only).</p>
-    <p style="margin:0 0 8px"><b>Estimate to complete (ETC)</b> = remaining forecast (months not yet elapsed), unless a manual ETC is set. Split by each person's <b>Release</b> tag → R2.1 / R2.2. <b>Est. at completion</b> = actual to date + ETC.</p>
+    <p style="margin:0 0 8px"><b>Estimate to complete (ETC)</b> = remaining forecast (months not yet elapsed), unless a manual ETC is set. Split by each person's <b>Release</b> tag → R2.1 / R2.2.</p>
+    <p style="margin:0 0 8px"><b>Est. at completion (EAC)</b> = actual to date + ETC. The "vs baseline" figure = EAC − Forecast total. <b>Note:</b> while only part of a month's actuals are loaded (e.g. one week), EAC reads <i>under</i> baseline simply because the unbooked time isn't in "actual" yet — it's a timing artefact, not a real saving. It corrects as the month's timesheets come in.</p>
     <p style="margin:0 0 8px"><b>Active resources</b> = distinct people (de-duplicated by name), excluding CRM.</p>
     <p style="margin:0"><b>AI adoption</b> = man-day-weighted AI benefit % from Scope, per release.</p>
     </div>
@@ -3867,7 +3868,7 @@ function genDashboardHTML() {
       ${kpi('Actual to date', fmt(T.aEl), 'of ' + fmt(T.fEl) + ' planned (elapsed)', '#2563EB')}
       ${kpi('Variance to date', (varPct > 0 ? '+' : '') + varPct.toFixed(1) + '%', Math.round(varE) + ' md vs plan', Math.abs(varPct) < 5 ? '#0F2544' : varPct > 0 ? '#B45309' : '#0F766E')}
       ${kpi('Estimate to complete', fmt(etcTot), (etc21 + etc22 > 0 ? 'R2.1 ' + fmt(etc21) + ' · R2.2 ' + fmt(etc22) : 'man-days remaining'), '#0F2544')}
-      ${kpi('Est. at completion', fmt(T.aEl + etcTot), Math.round(T.aEl + etcTot - T.fTot) + ' vs baseline ' + fmt(T.fTot), (T.aEl + etcTot) > T.fTot * 1.02 ? '#B45309' : '#0F766E')}
+      ${kpi('Est. at completion <span onclick="genKpiInfo()" title="What is included and how it is calculated" style="cursor:pointer;color:#2563EB;font-weight:800;font-size:12px">&#9432;</span>', fmt(T.aEl + etcTot), Math.round(T.aEl + etcTot - T.fTot) + ' vs baseline ' + fmt(T.fTot), (T.aEl + etcTot) > T.fTot * 1.02 ? '#B45309' : '#0F766E')}
       ${kpi('Active resources', activeCount, 'of ' + totalUniq + ' total', '#0F2544')}
       ${(() => { const ai = genAiStats(); const bits = Object.keys(ai.byRel).filter(r => ai.byRel[r].md > 0).map(r => `${r.replace(/^R/, '')} ${ai.pct(ai.byRel[r].md, ai.byRel[r].adj)}%`).join(' · '); return kpi('AI adoption', ai.overall + '%', bits ? 'by release: ' + bits : 'set AI % per segment in Scope', '#7C3AED'); })()}
     </div>

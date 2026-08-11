@@ -3832,13 +3832,16 @@ function genKpiInfo() {
   w.onclick = e => { if (e.target === w) w.remove(); };
   document.body.appendChild(w);
 }
-/** Monthly breakdown table with a LOE / Headcount toggle. */
-let genMonMode = 'loe';
+/** Monthly breakdown table with LOE/Headcount and Excl/Incl-CRM toggles. */
+let genMonMode = 'loe', genMonCrm = 'excl';
 function genMonToggle(m) { genMonMode = m; renderDashboardView(); }
-function genMonthlyTable(monthly, nowKey, srcRows, mk) {
+function genMonCrmToggle(c) { genMonCrm = c; renderDashboardView(); }
+function genMonthlyTable(nowKey, mk) {
   const fmt = n => Math.round(n).toLocaleString();
-  const heads = {}; (mk || []).forEach(mo => { const hc = new Set(), ha = new Set(); (srcRows || []).forEach(r => { const nm = (r.name || '').trim().toLowerCase(); if (!nm) return; if (resFcInMonth(r, mo.key) && (+((r.forecast || {})[mo.key] || 0)) > 0) hc.add(nm); if (resAcInMonth(r, mo.key) && (+((r.actual || {})[mo.key] || 0)) > 0) ha.add(nm); }); heads[mo.key] = { hc: hc.size, ha: ha.size }; });
-  const tog = `<span style="display:inline-flex;gap:3px;background:#F1F5F9;border-radius:8px;padding:2px;float:right">${[['loe', 'LOE (MD)'], ['heads', 'Headcount']].map(([k, l]) => `<button onclick="event.stopPropagation();genMonToggle('${k}')" style="border:none;cursor:pointer;font-size:11px;font-weight:700;padding:4px 10px;border-radius:6px;${genMonMode === k ? 'background:#0F2544;color:#fff' : 'background:transparent;color:#475569'}">${l}</button>`).join('')}</span>`;
+  const srcRows = genMonCrm === 'incl' ? (resourcing.rows || []) : (resourcing.rows || []).filter(r => !resIsCarve(r));
+  const monthly = mk.map(mo => { let f = 0, a = 0; srcRows.forEach(r => { if (resFcInMonth(r, mo.key)) f += +((r.forecast || {})[mo.key] || 0); if (resAcInMonth(r, mo.key)) a += +((r.actual || {})[mo.key] || 0); }); return { mo, f, a }; });
+  const heads = {}; (mk || []).forEach(mo => { const hc = new Set(), ha = new Set(); srcRows.forEach(r => { const nm = (r.name || '').trim().toLowerCase(); if (!nm) return; if (resFcInMonth(r, mo.key) && (+((r.forecast || {})[mo.key] || 0)) > 0) hc.add(nm); if (resAcInMonth(r, mo.key) && (+((r.actual || {})[mo.key] || 0)) > 0) ha.add(nm); }); heads[mo.key] = { hc: hc.size, ha: ha.size }; });
+  const tog = `<span style="display:inline-flex;gap:8px;float:right"><span style="display:inline-flex;gap:3px;background:#F1F5F9;border-radius:8px;padding:2px">${[['loe', 'LOE (MD)'], ['heads', 'Headcount']].map(([k, l]) => `<button onclick="event.stopPropagation();genMonToggle('${k}')" style="border:none;cursor:pointer;font-size:11px;font-weight:700;padding:4px 10px;border-radius:6px;${genMonMode === k ? 'background:#0F2544;color:#fff' : 'background:transparent;color:#475569'}">${l}</button>`).join('')}</span><span style="display:inline-flex;gap:3px;background:#F1F5F9;border-radius:8px;padding:2px">${[['excl', 'Excl CRM'], ['incl', 'Incl CRM']].map(([k, l]) => `<button onclick="event.stopPropagation();genMonCrmToggle('${k}')" style="border:none;cursor:pointer;font-size:11px;font-weight:700;padding:4px 10px;border-radius:6px;${genMonCrm === k ? 'background:#0F2544;color:#fff' : 'background:transparent;color:#475569'}">${l}</button>`).join('')}</span></span>`;
   let body, headCols, tot;
   if (genMonMode === 'heads') {
     body = monthly.map(m => { const elapsed = m.mo.key <= nowKey; const h = heads[m.mo.key] || { hc: 0, ha: 0 }; const dv = elapsed ? h.ha - h.hc : null; const col = dv == null ? '#94A3B8' : dv === 0 ? '#64748B' : dv > 0 ? '#B45309' : '#0F766E'; return `<tr${m.mo.key === nowKey ? ' style="background:#EFF6FF"' : ''}><td style="font-weight:600">${m.mo.label}${m.mo.key === nowKey ? ' <span style="font-size:9px;color:#2563EB;font-weight:800">◀ now</span>' : ''}</td><td style="text-align:right;font-weight:600">${h.hc}</td><td style="text-align:right;color:#2563EB">${elapsed ? h.ha : '—'}</td><td style="text-align:right;color:${col}">${dv == null ? '—' : (dv > 0 ? '+' : '') + dv}</td></tr>`; }).join('');
@@ -3895,7 +3898,7 @@ function genDashboardHTML() {
       ${(() => { const ai = genAiStats(); const bits = Object.keys(ai.byRel).filter(r => ai.byRel[r].md > 0).map(r => `${r.replace(/^R/, '')} ${ai.pct(ai.byRel[r].md, ai.byRel[r].adj)}%`).join(' · '); return kpi('AI adoption', ai.overall + '%', bits ? 'by release: ' + bits : 'set AI % per segment in Scope', '#7C3AED'); })()}
     </div>
     <div class="res-card" style="border-radius:14px"><div class="res-card-title" onclick="genChkToggle('chart')" style="cursor:pointer" title="Minimise / maximise"><span style="color:#94A3B8;margin-right:4px">${genChkCollapsed.has('chart') ? '▸' : '▾'}</span>Forecast vs Actual by month <span class="res-hint">bars = monthly · line = trend · grey/dashed = forecast · blue = actual</span></div>${genChkCollapsed.has('chart') ? '' : bars + genTrendLine(monthly)}</div>
-    <div class="res-card" style="border-radius:14px"><div class="res-card-title" onclick="genChkToggle('montbl')" style="cursor:pointer" title="Minimise / maximise"><span style="color:#94A3B8;margin-right:4px">${genChkCollapsed.has('montbl') ? '▸' : '▾'}</span>Monthly breakdown <span class="res-hint">toggle LOE (man-days) or Headcount · month by month · excl. CRM</span></div>${genChkCollapsed.has('montbl') ? '' : genMonthlyTable(monthly, nowKey, rows, mk)}</div>
+    <div class="res-card" style="border-radius:14px"><div class="res-card-title" onclick="genChkToggle('montbl')" style="cursor:pointer" title="Minimise / maximise"><span style="color:#94A3B8;margin-right:4px">${genChkCollapsed.has('montbl') ? '▸' : '▾'}</span>Monthly breakdown <span class="res-hint">toggle LOE / Headcount · Excl / Incl CRM · month by month</span></div>${genChkCollapsed.has('montbl') ? '' : genMonthlyTable(nowKey, mk)}</div>
     ${genDomainPoolPanel()}
     ${genValidationHTML()}
     ${genMgmtLOE()}

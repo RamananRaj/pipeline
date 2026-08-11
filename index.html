@@ -3691,10 +3691,11 @@ function genValidationHTML() {
   // Resources: domain → months with forecast > 0
   const rsDom = {};
   rows.forEach(r => { const dom = (r.domain || '').trim(); if (!dom) return; const dl = dom.toLowerCase(); mk.forEach(mo => { if (resFcInMonth(r, mo.key) && (+((r.forecast || {})[mo.key] || 0)) > 0) (rsDom[dl] = rsDom[dl] || { d: dom, m: new Set() }).m.add(mo.key); }); });
-  const noRes = [];   // timeline activity, no resource forecast that month
-  Object.keys(tlDom).forEach(dl => { const t = tlDom[dl], r = rsDom[dl]; const miss = [...t.m].filter(k => !(r && r.m.has(k))).sort(); if (miss.length) noRes.push({ dom: t.d, months: miss }); });
-  const noAct = [];   // resource forecast, no timeline activity that month
-  Object.keys(rsDom).forEach(dl => { const r = rsDom[dl], t = tlDom[dl]; const miss = [...r.m].filter(k => !(t && t.m.has(k))).sort(); if (miss.length) noAct.push({ dom: r.d, months: miss }); });
+  const nowKey = new Date().toISOString().slice(0, 7);   // only flag the active (current) month — future months aren't a real gap yet
+  const noRes = [];   // timeline activity, no resource forecast this month
+  Object.keys(tlDom).forEach(dl => { const t = tlDom[dl], r = rsDom[dl]; const miss = [...t.m].filter(k => k === nowKey && !(r && r.m.has(k))).sort(); if (miss.length) noRes.push({ dom: t.d, months: miss }); });
+  const noAct = [];   // resource forecast, no timeline activity this month
+  Object.keys(rsDom).forEach(dl => { const r = rsDom[dl], t = tlDom[dl]; const miss = [...r.m].filter(k => k === nowKey && !(t && t.m.has(k))).sort(); if (miss.length) noAct.push({ dom: r.d, months: miss }); });
   const incomplete = rows.filter(r => !(r.name || '').trim() || !(r.domain || '').trim());
   const block = (id, icon, bg, fg, title, hint, items, render) => {
     const collapsed = genChkCollapsed.has(id);

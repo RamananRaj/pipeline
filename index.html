@@ -3811,6 +3811,25 @@ function genAiStats() {
   const pct = (md, adj) => md > 0 ? Math.round((md - adj) / md * 100) : 0;
   return { overall: pct(tMd, tAdj), tMd, byRel, pct };
 }
+/** Info popup explaining what the dashboard headline KPIs include & how they're calculated. */
+function genKpiInfo() {
+  const ex = document.getElementById('uiModalWrap'); if (ex) ex.remove();
+  const html = `<div style="font-size:16px;font-weight:800;color:#0F2544;margin-bottom:10px">What's in these numbers</div>
+    <div style="font-size:13px;color:#1E293B;line-height:1.55">
+    <p style="margin:0 0 8px"><b>Forecast (total)</b> = sum of every resource's monthly forecast man-days across the window (weekly/monthly hours ÷ 7.5). It <b>includes all delivery groups</b>: Management, Build, Testing, Business Analyst, Architecture, DM/D&amp;A and NFR/Platform.</p>
+    <p style="margin:0 0 8px"><b>CRM is excluded</b> from the headline — it's tracked separately. The subtext shows it as "+ CRM (separate)" and it has its own section lower down.</p>
+    <p style="margin:0 0 8px"><b>Actual to date</b> = timesheet actuals loaded for elapsed months. <b>Variance to date</b> = actual − forecast-to-date (elapsed only).</p>
+    <p style="margin:0 0 8px"><b>Estimate to complete (ETC)</b> = remaining forecast (months not yet elapsed), unless a manual ETC is set. Split by each person's <b>Release</b> tag → R2.1 / R2.2. <b>Est. at completion</b> = actual to date + ETC.</p>
+    <p style="margin:0 0 8px"><b>Active resources</b> = distinct people (de-duplicated by name), excluding CRM.</p>
+    <p style="margin:0"><b>AI adoption</b> = man-day-weighted AI benefit % from Scope, per release.</p>
+    </div>
+    <div style="text-align:right;margin-top:14px"><button onclick="document.getElementById('uiModalWrap').remove()" style="background:#0F2544;color:#fff;border:none;padding:8px 16px;border-radius:8px;cursor:pointer;font-weight:600">Got it</button></div>`;
+  const w = document.createElement('div'); w.id = 'uiModalWrap';
+  w.style = 'position:fixed;inset:0;background:rgba(15,37,68,.35);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  w.innerHTML = `<div style="background:#fff;border-radius:14px;padding:22px 24px;max-width:560px;box-shadow:0 12px 40px rgba(15,37,68,.25)">${html}</div>`;
+  w.onclick = e => { if (e.target === w) w.remove(); };
+  document.body.appendChild(w);
+}
 /** Month-by-month Forecast vs Actual trend as a line graph (SVG). monthly = [{mo:{label}, f, a}]. */
 function genTrendLine(monthly) {
   const n = monthly.length; if (!n) return '';
@@ -3843,7 +3862,7 @@ function genDashboardHTML() {
   return `
     <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:18px"><div><div style="font-size:20px;font-weight:800;color:#0F2544">Genesis — Programme Dashboard</div><div style="font-size:12px;color:#64748B;margin-top:2px">Resourcing forecast vs actual &amp; resource pool by domain</div></div><input id="resSearchInput" value="${resSearch.replace(/"/g, '&quot;')}" oninput="resSetSearch(this.value)" placeholder="🔍 Search name…" style="padding:6px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:12px;min-width:160px"></div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px">
-      ${kpi('Forecast (total)', fmt(T.fTot), carveFC > 0 ? 'excl. CRM · + ' + fmt(carveFC) + ' CRM (separate) = ' + fmt(T.fTot + carveFC) + ' all-in' : 'man-days in window', '#0F2544')}
+      ${kpi('Forecast (total) <span onclick="genKpiInfo()" title="What is included and how it is calculated" style="cursor:pointer;color:#2563EB;font-weight:800;font-size:12px">&#9432;</span>', fmt(T.fTot), carveFC > 0 ? 'excl. CRM · + ' + fmt(carveFC) + ' CRM (separate) = ' + fmt(T.fTot + carveFC) + ' all-in' : 'man-days in window', '#0F2544')}
       ${kpi('Actual to date', fmt(T.aEl), 'of ' + fmt(T.fEl) + ' planned (elapsed)', '#2563EB')}
       ${kpi('Variance to date', (varPct > 0 ? '+' : '') + varPct.toFixed(1) + '%', Math.round(varE) + ' md vs plan', Math.abs(varPct) < 5 ? '#0F2544' : varPct > 0 ? '#B45309' : '#0F766E')}
       ${kpi('Estimate to complete', fmt(etcTot), (etc21 + etc22 > 0 ? 'R2.1 ' + fmt(etc21) + ' · R2.2 ' + fmt(etc22) : 'man-days remaining'), '#0F2544')}
@@ -4584,7 +4603,7 @@ function renderResourcingView() {
     const badge = `<button onclick="resToggleActive(${i})" title="Click to change status (asks for an effective date)" style="cursor:pointer;border:none;font-size:10px;font-weight:700;padding:3px 10px;border-radius:11px;${off ? 'background:#F1F5F9;color:#94A3B8' : 'background:#DCFCE7;color:#15803D'}">${off ? 'Inactive' : 'Active'}${eff}</button>`;
     const open = resExpanded.has(r.id);
     const caret = `<button onclick="resToggleExpand(${r.id})" title="Enter weekly forecast hours" style="cursor:pointer;border:1px solid ${open ? '#2563EB' : '#E2E8F0'};background:${open ? '#EFF6FF' : '#fff'};color:${open ? '#2563EB' : '#64748B'};margin-right:8px;font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:9px;user-select:none;vertical-align:middle">${open ? '▾' : '▸'} Weekly</button>`;
-    const mainRow = `<tr data-nm="${(r.name || '').toLowerCase().replace(/"/g, '&quot;')}" style="${off ? 'opacity:.5' : ''}"><td style="text-align:center"><input type="checkbox" onclick="resToggleSel(${r.id},this.checked)" ${resSelected.has(r.id) ? 'checked' : ''} style="cursor:pointer"></td><td style="font-weight:500">${caret}<span onclick="resOpenDetail(${i})" title="Open resource details" style="cursor:pointer;border-bottom:1px dotted transparent" onmouseover="this.style.borderBottomColor='#94A3B8'" onmouseout="this.style.borderBottomColor='transparent'">${r.name || '—'}</span></td><td style="color:#64748B">${r.role || ''}</td><td>${r.domain || ''}</td><td style="color:#64748B">${r.release || ''}</td><td style="text-align:right">${fmt(rf)}</td><td style="text-align:right;font-weight:600">${fmt(ra)}</td><td style="text-align:right">${etcCell}</td><td style="text-align:right">${otCell}</td><td style="text-align:center">${badge}</td><td style="text-align:center"><button onclick="resDeleteRow(${i})" title="Remove" style="border:none;background:none;color:#CBD5E1;cursor:pointer;font-size:16px;line-height:1" onmouseover="this.style.color='#DC2626'" onmouseout="this.style.color='#CBD5E1'">×</button></td></tr>`;
+    const mainRow = `<tr data-nm="${(r.name || '').toLowerCase().replace(/"/g, '&quot;')}" style="${off ? 'opacity:.5' : ''}"><td style="text-align:center"><input type="checkbox" onclick="resToggleSel(${r.id},this.checked)" ${resSelected.has(r.id) ? 'checked' : ''} style="cursor:pointer"></td><td style="font-weight:500">${caret}<span onclick="resOpenDetail(${i})" title="Open resource details" style="cursor:pointer;border-bottom:1px dotted transparent" onmouseover="this.style.borderBottomColor='#94A3B8'" onmouseout="this.style.borderBottomColor='transparent'">${r.name || '—'}</span>${r.isNew ? ' <span title="Newly added in the last forecast import" style="background:#DCFCE7;color:#15803D;font-size:9px;font-weight:800;border-radius:8px;padding:1px 6px;margin-left:4px">NEW</span>' : ''}</td><td style="color:#64748B">${r.role || ''}</td><td>${r.domain || ''}</td><td style="color:#64748B">${r.release || ''}</td><td style="text-align:right">${fmt(rf)}</td><td style="text-align:right;font-weight:600">${fmt(ra)}</td><td style="text-align:right">${etcCell}</td><td style="text-align:right">${otCell}</td><td style="text-align:center">${badge}</td><td style="text-align:center"><button onclick="resDeleteRow(${i})" title="Remove" style="border:none;background:none;color:#CBD5E1;cursor:pointer;font-size:16px;line-height:1" onmouseover="this.style.color='#DC2626'" onmouseout="this.style.color='#CBD5E1'">×</button></td></tr>`;
     let detail = '';
     if (open) {
       const WK = resWeeks(), byMo = {};
@@ -4847,7 +4866,16 @@ function resActualsClear() { (resourcing.rows || []).forEach(r => { r.actual = {
 // Preserve loaded actuals across a Forecast re-import (which rebuilds the rows). Snapshot by person name.
 function resSnapshotActuals() { const s = {}; (resourcing.rows || []).forEach(r => { const k = (r.name || '').trim().toLowerCase(); if (!k) return; const hasA = (r.actual && Object.keys(r.actual).length) || (r.actualWk && Object.keys(r.actualWk).length); if (hasA && !s[k]) s[k] = { actual: r.actual || {}, actualWk: r.actualWk || {}, overtime: r.overtime || {} }; }); return s; }
 function resRestoreActuals(snap) { if (!snap) return; const used = {}; (resourcing.rows || []).forEach(r => { const k = (r.name || '').trim().toLowerCase(); if (snap[k] && !used[k]) { r.actual = snap[k].actual; r.actualWk = snap[k].actualWk; r.overtime = snap[k].overtime; used[k] = true; } }); }
-function _resImportForecastKeepActuals(arr, wipe) { const snap = resSnapshotActuals(); if (wipe) resourcing.rows = []; _resMapImport(arr, 'forecast'); resRestoreActuals(snap); persistResourcing(); renderResourcingView(); }
+function _resImportForecastKeepActuals(arr, wipe) {
+  const snap = resSnapshotActuals();
+  const prior = new Set((resourcing.rows || []).map(r => (r.name || '').trim().toLowerCase()).filter(Boolean));
+  if (wipe) resourcing.rows = [];
+  _resMapImport(arr, 'forecast');
+  resRestoreActuals(snap);
+  let nNew = 0; (resourcing.rows || []).forEach(r => { const k = (r.name || '').trim().toLowerCase(); if (k && !prior.has(k)) { r.isNew = true; nNew++; } else { delete r.isNew; } });
+  persistResourcing(); renderResourcingView();
+  if (nNew) setTimeout(() => alert(nNew + ' new resource(s) in this forecast are flagged NEW in the Resources list.'), 60);
+}
 /** Ask whether to merge or replace before mapping the parsed rows. Replace means different things for forecast vs actual. */
 function resAskImportMode(arr, mode) {
   const existing = (resourcing.rows || []).length;

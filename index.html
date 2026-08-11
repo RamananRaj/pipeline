@@ -5824,10 +5824,12 @@ function govCRopen(id) {
     { id: 'sf', label: 'SF', type: 'number', value: (c && c.sf != null) ? c.sf : '' },
     { id: 'status', label: 'Status', type: 'select', value: (c && c.status) || 'Raised', options: [['Raised', 'Raised'], ['Assessing', 'Assessing'], ['Approved', 'Approved'], ['Rejected', 'Rejected'], ['Implemented', 'Implemented']] },
     { id: 'owner', label: 'Owner', value: (c && c.owner) || '' },
+    { id: 'created', label: 'Created date', type: 'date', value: (c && c.created) || (c && c.raised) || '' },
+    { id: 'delivery', label: 'Delivery date', type: 'date', value: (c && c.delivery) || '' },
     { id: 'notes', label: 'Notes', value: (c && c.notes) || '' }
   ], 'Save', v => {
     if (!v.title.trim()) return;
-    const patch = { ref: v.ref.trim(), title: v.title.trim(), value: num(v.value), days: num(v.days), build: num(v.build), g2: num(v.g2), sf: num(v.sf), status: v.status, owner: v.owner.trim(), notes: v.notes.trim() };
+    const patch = { ref: v.ref.trim(), title: v.title.trim(), value: num(v.value), days: num(v.days), build: num(v.build), g2: num(v.g2), sf: num(v.sf), status: v.status, owner: v.owner.trim(), created: v.created, delivery: v.delivery, notes: v.notes.trim() };
     if (c) { Object.assign(c, patch); }
     else { governance.crs.push(Object.assign({ id: rmId(), ref: patch.ref || 'CR-' + String(governance.crs.length + 1).padStart(3, '0'), raised: new Date().toISOString().slice(0, 10) }, patch)); }
     persistGovernance(); renderGovernance();
@@ -5852,7 +5854,8 @@ function govCRseed() {
     ['CR079', 'Bulk MEP Nominations', 38721.38, 30.24, 5, 5, null]
   ];
   const have = new Set((governance.crs || []).map(c => (c.ref || '').toLowerCase()));
-  let n = 0; d.forEach(([ref, title, value, days, build, g2, sf]) => { if (have.has(ref.toLowerCase())) return; governance.crs.push({ id: rmId(), ref, title, value, days, build, g2, sf, status: 'Raised', owner: '', notes: '', raised: new Date().toISOString().slice(0, 10) }); n++; });
+  const today = new Date().toISOString().slice(0, 10);
+  let n = 0; d.forEach(([ref, title, value, days, build, g2, sf]) => { if (have.has(ref.toLowerCase())) return; governance.crs.push({ id: rmId(), ref, title, value, days, build, g2, sf, status: 'Raised', owner: '', created: today, delivery: '', notes: '', raised: today }); n++; });
   persistGovernance(); renderGovernance();
 }
 function govCRdel(id) { uiConfirm('Delete change request', 'Remove this CR?', () => { governance.crs = governance.crs.filter(x => x.id !== id); persistGovernance(); renderGovernance(); }); }
@@ -5891,7 +5894,8 @@ function renderGovernance() {
   const del = fn => `<button onclick="${fn}" title="Remove" style="border:none;background:none;color:#CBD5E1;cursor:pointer;font-size:15px" onmouseover="this.style.color='#DC2626'" onmouseout="this.style.color='#CBD5E1'">×</button>`;
   const money = v => v == null ? '—' : '$' + Math.round(v).toLocaleString();
   const nc = v => v == null ? '<span style="color:#CBD5E1">—</span>' : (Math.round(v * 100) / 100).toLocaleString();
-  const crRows = governance.crs.length ? governance.crs.map(c => { const st = stC[c.status] || ['#F1F5F9', '#64748B']; return `<tr><td onclick="govCRopen(${c.id})" style="cursor:pointer;font-weight:600">${c.ref || ''}</td><td onclick="govCRopen(${c.id})" style="cursor:pointer">${c.title}</td><td style="text-align:right;color:#64748B">${money(c.value)}</td><td style="text-align:right;font-weight:600">${nc(c.days)}</td><td style="text-align:right">${nc(c.build)}</td><td style="text-align:right">${nc(c.g2)}</td><td style="text-align:right">${nc(c.sf)}</td><td>${badge(c.status, st[0], st[1])}</td><td style="color:#64748B">${c.owner || '—'}</td><td style="text-align:center">${del('govCRdel(' + c.id + ')')}</td></tr>`; }).join('') : `<tr><td colspan="10" style="text-align:center;color:#94A3B8;padding:14px">No change requests yet — <strong>+ New CR</strong> or <strong>Load CR list</strong>.</td></tr>`;
+  const fd = s => { if (!s) return '<span style="color:#CBD5E1">—</span>'; const dt = new Date(s); return isNaN(dt) ? s : dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }); };
+  const crRows = governance.crs.length ? governance.crs.map(c => { const st = stC[c.status] || ['#F1F5F9', '#64748B']; return `<tr><td onclick="govCRopen(${c.id})" style="cursor:pointer;font-weight:600">${c.ref || ''}</td><td onclick="govCRopen(${c.id})" style="cursor:pointer">${c.title}</td><td style="text-align:right;color:#64748B">${money(c.value)}</td><td style="text-align:right;font-weight:600">${nc(c.days)}</td><td style="text-align:right">${nc(c.build)}</td><td style="text-align:right">${nc(c.g2)}</td><td style="text-align:right">${nc(c.sf)}</td><td>${badge(c.status, st[0], st[1])}</td><td style="color:#64748B">${c.owner || '—'}</td><td style="white-space:nowrap;color:#64748B">${fd(c.created || c.raised)}</td><td style="white-space:nowrap;color:#64748B">${fd(c.delivery)}</td><td style="text-align:center">${del('govCRdel(' + c.id + ')')}</td></tr>`; }).join('') : `<tr><td colspan="12" style="text-align:center;color:#94A3B8;padding:14px">No change requests yet — <strong>+ New CR</strong> or <strong>Load CR list</strong>.</td></tr>`;
   const riskRows = governance.risks.length ? governance.risks.map(r => { const rag = govRag(r.prob, r.impact); const st = stC[r.status] || ['#F1F5F9', '#64748B']; return `<tr><td onclick="govRiskOpen(${r.id})" style="cursor:pointer;font-weight:600">${r.ref || ''}</td><td onclick="govRiskOpen(${r.id})" style="cursor:pointer">${r.title}${r.impacted ? `<div style="font-size:10px;color:#94A3B8">impacts: ${r.impacted}</div>` : ''}</td><td>${r.type}</td><td style="color:#64748B">${r.phase || '—'}</td><td style="text-align:center">${r.prob}×${r.impact}</td><td>${badge(rag, rag === 'Red' ? '#FEE2E2' : rag === 'Amber' ? '#FEF3C7' : '#DCFCE7', GOV_RAGC[rag])}</td><td>${badge(r.status, st[0], st[1])}</td><td style="color:#64748B">${r.owner || '—'}</td><td style="text-align:center">${del('govRiskDel(' + r.id + ')')}</td></tr>`; }).join('') : `<tr><td colspan="9" style="text-align:center;color:#94A3B8;padding:14px">No risks or issues yet — <strong>+ New</strong>.</td></tr>`;
   el.innerHTML = `
     <div style="font-size:20px;font-weight:800;color:#0F2544;margin-bottom:4px">Governance</div>
@@ -5905,7 +5909,7 @@ function renderGovernance() {
     <div class="res-card" style="border-radius:12px"><div class="res-card-title">Complexity matrix <span class="res-hint">Genesis-only · man-days per CR complexity (drives the estimate)</span></div>
       <div style="display:flex;gap:22px;flex-wrap:wrap;padding:4px 2px">${matrix}</div></div>
     <div class="res-card" style="border-radius:12px"><div class="res-card-title">Change Requests<span style="float:right;display:inline-flex;gap:6px"><button onclick="govCRseed()" title="Load the CR list (CR064–CR080)" style="background:#F1F5F9;color:#475569;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-weight:600;font-size:11px">Load CR list</button><button onclick="govCRopen(0)" style="background:#0F2544;color:#fff;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-weight:600;font-size:11px">＋ New CR</button></span></div>
-      <table class="dtable"><thead><tr><th>Ref</th><th>Title</th><th style="text-align:right">Value</th><th style="text-align:right">Days</th><th style="text-align:right">Build only</th><th style="text-align:right">G2</th><th style="text-align:right">SF</th><th>Status</th><th>Owner</th><th></th></tr></thead><tbody>${crRows}</tbody></table></div>
+      <table class="dtable"><thead><tr><th>Ref</th><th>Title</th><th style="text-align:right">Value</th><th style="text-align:right">Days</th><th style="text-align:right">Build only</th><th style="text-align:right">G2</th><th style="text-align:right">SF</th><th>Status</th><th>Owner</th><th>Created</th><th>Delivery</th><th></th></tr></thead><tbody>${crRows}</tbody></table></div>
     <div class="res-card" style="border-radius:12px"><div class="res-card-title">Risks &amp; Issues<button onclick="govRiskOpen(0)" style="float:right;background:#0F2544;color:#fff;border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-weight:600;font-size:11px">＋ New</button></div>
       <table class="dtable"><thead><tr><th>Ref</th><th>Title</th><th>Type</th><th>Phase</th><th style="text-align:center">P×I</th><th>RAG</th><th>Status</th><th>Owner</th><th></th></tr></thead><tbody>${riskRows}</tbody></table></div>`;
 }

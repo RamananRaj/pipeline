@@ -490,17 +490,19 @@ body.drag-active *{cursor:grabbing!important;user-select:none;}
       <div id="cloudActivePanel" style="display:none">
         <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:8px;padding:14px;margin-bottom:16px">
           <div style="font-size:13px;font-weight:700;color:#16A34A;margin-bottom:4px">✓ Cloud sync is active</div>
-          <div style="font-size:12px;color:#374151;line-height:1.6">Your data is synced to a <strong>GitHub Gist</strong> in your account. Share the URL below with your team — anyone with the link can view and edit.</div>
+          <div style="font-size:12px;color:#374151;line-height:1.6">This <strong>token-less link</strong> is safe to share — it contains no credential. Send the <strong>token separately</strong> only to people who should <strong>edit</strong>; they paste it once. Whether others can <strong>view without a token</strong> depends on the workspace being public (below).</div>
         </div>
-        <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
           <input id="shareUrlInput" class="fi" type="text" readonly style="flex:1;font-size:11px;background:#F8FAFC;color:#374151;cursor:text">
-          <button class="btn btn-primary" onclick="copyShareUrl(false)">Copy</button>
+          <button class="btn btn-primary" onclick="copyShareUrl(false)">Copy link</button>
         </div>
-        <div style="font-size:11px;color:#94A3B8;line-height:1.6">Changes auto-save within ~1 second. Team members need to <strong>refresh the page</strong> to pick up each other's edits.</div>
+        <div id="cloudVisRow" style="font-size:11px;color:#64748B;line-height:1.6;margin-bottom:8px"></div>
+        <div style="font-size:11px;color:#94A3B8;line-height:1.6">Changes auto-save within ~1 second. Team members <strong>refresh</strong> to pick up edits.</div>
       </div>
 
       <!-- Setup state: first-time configuration -->
       <div id="cloudSetupPanel">
+        <div id="cloudJoinNote" style="display:none;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#1E3A8A;line-height:1.6">You've opened a <strong>shared workspace link</strong>. To view/edit, paste the <strong>token</strong> a key member gave you (it's stored only on this device, never in the link).</div>
         <p style="font-size:13px;color:#374151;margin-bottom:14px;line-height:1.6">
           Enable cloud sync so your whole team views and edits the same live data.
           Your data is stored in a <strong>GitHub Gist</strong> — it lives in your own GitHub account, is version-controlled, and never touches a third-party server.
@@ -515,7 +517,7 @@ body.drag-active *{cursor:grabbing!important;user-select:none;}
         <div class="fg">
           <label class="fl">GitHub Personal Access Token <span class="req">*</span></label>
           <input class="fi" type="password" id="cloudKey" placeholder="ghp_…" autocomplete="off">
-          <div class="fhint">Needs "gist" scope only — stored in the URL hash, never sent to any third-party server</div>
+          <div class="fhint">Needs "gist" scope only — stored locally on this device, never placed in the shared link</div>
         </div>
         <div id="cloudSetupStatus" style="font-size:12px;margin-top:8px;min-height:18px;font-weight:600"></div>
       </div>
@@ -524,7 +526,7 @@ body.drag-active *{cursor:grabbing!important;user-select:none;}
     <div class="mo-foot">
       <button class="btn btn-ghost" onclick="closeModal('moCloud')">Close</button>
       <div id="cloudSetupFooter" class="mo-foot-r">
-        <button class="btn btn-primary" onclick="setupCloud()">Enable Cloud Sync →</button>
+        <button class="btn btn-primary" id="cloudSetupBtn" onclick="setupCloud()">Enable Cloud Sync →</button>
       </div>
     </div>
   </div>
@@ -2327,6 +2329,7 @@ const GIST_FILE  = 'aar_programs_of_work.json';
 const JBIN_URL   = 'https://api.jsonbin.io/v3/b'; // retained for backward-compat with old JSONbin links
 let binId        = null;   // gist ID (or jsonbin bin ID for old links)
 let masterKey    = null;   // GitHub PAT (or jsonbin key for old links)
+let cloudReadOnly = false; // true when viewing a public workspace without a token
 let backendType  = null;   // 'gist' | 'jsonbin'
 let cloudTimer   = null;
 let lastSyncVersion = null;   // gist revision we last loaded/saved — for conflict detection
@@ -2346,10 +2349,10 @@ function parseHashConfig() {
   } catch { return {}; }
 }
 
-function setHashConfig(type, id, secret) {
+function setHashConfig(type, id) {
+  // Token-less share link: only the workspace id goes in the URL. The token lives in localStorage on each device.
   const p = new URLSearchParams();
-  if (type === 'gist') { p.set('gist', id); p.set('token', secret); }
-  else                 { p.set('bin',  id); p.set('key',   secret); }
+  if (type === 'gist') p.set('gist', id); else p.set('bin', id);
   history.replaceState(null, '', '#' + p.toString());
 }
 
@@ -2423,13 +2426,13 @@ function applyCloudData(data) {
 /** Fetch cloud data for a config, or throw. Returns { data, version }. */
 async function cloudFetch(cfg) {
   if (cfg.type === 'gist') {
-    const r = await fetch(`${GITHUB_API}/gists/${cfg.id}`, {
-      headers: { 'Authorization': `Bearer ${cfg.secret}`, 'Accept': 'application/vnd.github+json' }
-    });
+    const headers = { 'Accept': 'application/vnd.github+json' };
+    if (cfg.secret) headers['Authorization'] = `Bearer ${cfg.secret}`;   // no token ⇒ unauthenticated read (works for public gists)
+    const r = await fetch(`${GITHUB_API}/gists/${cfg.id}`, { headers });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const gist = await r.json();
     const raw  = gist.files?.[GIST_FILE]?.content;
-    return { data: raw ? JSON.parse(raw) : null, version: gist.history?.[0]?.version || null };
+    return { data: raw ? JSON.parse(raw) : null, version: gist.history?.[0]?.version || null, public: gist.public };
   }
   const r = await fetch(`${JBIN_URL}/${cfg.id}/latest`, {
     headers: { 'X-Master-Key': cfg.secret, 'X-Bin-Meta': 'false' }
@@ -2449,17 +2452,36 @@ function loadStoredCloud() {
   catch { return null; }
 }
 
+let pendingGistId = null;   // workspace id from a token-less link, awaiting a token on this device
 async function initCloud() {
   const urlCfg  = parseHashConfig();
   const stored  = loadStoredCloud();
-  const primary = (urlCfg.id && urlCfg.secret) ? urlCfg : stored;
+  let primary;
+  if (urlCfg.id && urlCfg.secret) primary = urlCfg;                                   // legacy link (token in URL)
+  else if (urlCfg.id && stored && stored.secret) primary = { type: urlCfg.type || 'gist', id: urlCfg.id, secret: stored.secret };  // token-less link + token stored on this device
+  else primary = stored;
+  // Opened a token-less link but no token on this device yet → prompt to connect
+  if (urlCfg.id && !(primary && primary.secret)) pendingGistId = urlCfg.id;
 
-  if (!primary || !primary.id || !primary.secret) { setSyncBadge('local'); renderStats(); render(); return; }
+  if (!primary || !primary.id || !primary.secret) {
+    // No token here. If the URL names a workspace, try a public (view-only) read so non-editors can see it without a token.
+    if (urlCfg.id) {
+      setSyncBadge('loading');
+      try {
+        const res = await cloudFetch({ type: urlCfg.type || 'gist', id: urlCfg.id, secret: null });
+        applyCloudData(res.data); lastSyncVersion = res.version;
+        binId = urlCfg.id; masterKey = null; backendType = urlCfg.type || 'gist'; cloudReadOnly = true;
+        setSyncBadge('ready', '👁 View only — no token (read-only)');
+        renderStats(); render(); return;
+      } catch (e) { /* private gist or 404 → needs a token to view */ }
+    }
+    setSyncBadge('local'); renderStats(); render(); return;
+  }
 
   const activate = (cfg, reconnected) => {
-    binId = cfg.id; masterKey = cfg.secret; backendType = cfg.type;
+    binId = cfg.id; masterKey = cfg.secret; backendType = cfg.type; cloudReadOnly = false;
     storeCloud();
-    setHashConfig(cfg.type, cfg.id, cfg.secret);   // keep the URL pointing at the working config
+    setHashConfig(cfg.type, cfg.id);   // token-less URL — points at the workspace, token stays local
     setSyncBadge('ready', reconnected ? '✓ Synced (auto-reconnected)' : undefined);
   };
 
@@ -2495,8 +2517,14 @@ function openCloudModal() {
   document.getElementById('cloudActivePanel').style.display  = hasCfg ? '' : 'none';
   document.getElementById('cloudSetupPanel').style.display   = hasCfg ? 'none' : '';
   document.getElementById('cloudSetupFooter').style.display  = hasCfg ? 'none' : '';
-  document.getElementById('moCloudTitle').textContent        = hasCfg ? '☁ Cloud Sync' : '☁ Enable Cloud Sync';
+  document.getElementById('moCloudTitle').textContent        = hasCfg ? '☁ Cloud Sync' : (pendingGistId ? '☁ Join shared workspace' : '☁ Enable Cloud Sync');
+  const joinEl = document.getElementById('cloudJoinNote'); if (joinEl) joinEl.style.display = (!hasCfg && pendingGistId) ? '' : 'none';
+  const setupBtn = document.getElementById('cloudSetupBtn'); if (setupBtn) setupBtn.textContent = pendingGistId ? 'Connect →' : 'Enable Cloud Sync →';
   if (hasCfg) document.getElementById('shareUrlInput').value = window.location.href;
+  const vis = document.getElementById('cloudVisRow');
+  if (vis && hasCfg) vis.innerHTML = cloudReadOnly
+    ? '👁 You are <strong>viewing</strong> this workspace (no token) — read-only.'
+    : '🔒 This workspace is <strong>private</strong>: people need the <strong>token</strong> to view or edit. To let others <strong>view without a token</strong>, the workspace would need to be a <strong>public</strong> gist (anyone with the link could read it) — usually not advisable for internal data; prefer sending an <strong>Export</strong> to viewers.';
   document.getElementById('moCloud').classList.add('open');
 }
 
@@ -2504,6 +2532,23 @@ async function setupCloud() {
   const token = (document.getElementById('cloudKey').value || '').trim();
   if (!token) { document.getElementById('cloudKey').focus(); return; }
   const statusEl = document.getElementById('cloudSetupStatus');
+  // Joining an existing shared workspace (opened a token-less link): connect to that gist, don't create a new one
+  if (pendingGistId) {
+    statusEl.style.color = '#F59E0B'; statusEl.textContent = '⟳ Connecting to shared workspace…';
+    try {
+      const res = await cloudFetch({ type: 'gist', id: pendingGistId, secret: token });
+      applyCloudData(res.data); lastSyncVersion = res.version;
+      binId = pendingGistId; masterKey = token; backendType = 'gist'; cloudDirty = false;
+      storeCloud(); setHashConfig('gist', pendingGistId); setSyncBadge('ready');
+      statusEl.style.color = '#16A34A'; statusEl.textContent = '✓ Connected — loading shared data…';
+      renderStats(); render();
+      setTimeout(() => { pendingGistId = null; openCloudModal(); }, 700);
+    } catch (e) {
+      statusEl.style.color = '#DC2626';
+      statusEl.textContent = '⚠ ' + (String(e.message).includes('401') ? 'Invalid token, or it lacks access to this workspace' : (e.message || 'Connect failed'));
+    }
+    return;
+  }
   statusEl.style.color = '#F59E0B';
   statusEl.textContent = '⟳ Creating GitHub Gist…';
   try {
@@ -5161,6 +5206,33 @@ function uiConfirm(title, message, onYes, yesLabel) {
   document.getElementById('uiConfirmYes').onclick = () => { uiCloseModal(); if (onYes) onYes(); };
 }
 
+/** Load the CR staggered delivery plan as a Timeline track — one sub-lane per CR, bars for Design/DCUT/ST/SIT. */
+function rmSeedCRs() {
+  // [ref, sizeLabel, design[s,e], dcut[s,e], st[s,e], sit[s,e]] — dates ISO (2026/27)
+  const P = [
+    ['CR086', 'Large', ['2026-09-21', '2026-09-25'], ['2026-09-21', '2026-10-30'], ['2026-11-02', '2026-11-13'], ['2026-11-16', '2026-11-20']],
+    ['CR082', 'Medium', ['2026-09-28', '2026-10-02'], ['2026-10-05', '2026-10-16'], ['2026-10-19', '2026-10-30'], ['2026-11-16', '2026-11-20']],
+    ['CR088', 'Small', ['2026-10-05', '2026-10-09'], ['2026-10-12', '2026-10-23'], ['2026-10-26', '2026-10-30'], ['2026-11-16', '2026-11-20']],
+    ['CR084', 'Small', ['2026-10-05', '2026-10-09'], ['2026-10-12', '2026-10-16'], ['2026-10-19', '2026-10-23'], ['2026-11-16', '2026-11-20']],
+    ['CR085', 'Small', ['2026-10-12', '2026-10-16'], ['2026-10-19', '2026-10-23'], ['2026-10-26', '2026-10-30'], ['2026-11-16', '2026-11-20']],
+    ['CR092', 'Small', ['2026-10-12', '2026-10-16'], ['2026-10-19', '2026-10-23'], ['2026-11-02', '2026-11-06'], ['2026-11-16', '2026-11-20']],
+    ['CR074', 'Large', ['2026-09-21', '2026-09-25'], ['2026-09-28', '2026-11-13'], ['2026-11-16', '2026-11-27'], ['2026-12-01', '2026-12-04']],
+    ['CR091', 'Medium', ['2026-10-19', '2026-10-23'], ['2026-10-26', '2026-11-13'], ['2026-11-16', '2026-11-27'], ['2026-12-01', '2026-12-04']],
+    ['CR075', 'Large', ['2026-10-26', '2026-10-30'], ['2026-11-02', '2026-11-13'], ['2026-11-16', '2026-11-27'], ['2026-12-01', '2026-12-04']],
+    ['CR064', 'Large', ['2026-09-21', '2026-09-25'], ['2026-09-28', '2026-11-27'], ['2026-11-30', '2026-12-11'], ['2026-12-14', '2026-12-18']],
+    ['CR070', 'Large', ['2026-11-02', '2026-11-06'], ['2026-11-09', '2026-11-27'], ['2026-11-30', '2026-12-11'], ['2026-12-14', '2026-12-18']]
+  ];
+  const lanes = P.map(([ref, size, d, b, t, s]) => ({
+    id: rmId(), name: ref + ' — ' + size, bars: [
+      { id: rmId(), label: 'Design', category: 'design', start: d[0], end: d[1], pct: 0 },
+      { id: rmId(), label: 'DCUT', category: 'build', start: b[0], end: b[1], pct: 0 },
+      { id: rmId(), label: 'ST', category: 'test', start: t[0], end: t[1], pct: 0 },
+      { id: rmId(), label: 'SIT', category: 'integ', start: s[0], end: s[1], pct: 0 }
+    ]
+  }));
+  roadmap.sections.push({ id: rmId(), name: 'Change Requests — Staggered Delivery', color: '#7C3AED', groups: [{ id: rmId(), name: 'CRs', lanes }] });
+  rmEnsureUniqueIds(); persistRoadmap(); renderRoadmap();
+}
 function rmAddSection() { uiModal('New section', [{ id: 'name', label: 'Section heading', placeholder: 'e.g. Track 1: Build & Test' }, { id: 'color', label: 'Colour', type: 'color', value: '#1F3864' }], 'Add section', v => { if (!v.name.trim()) return; roadmap.sections.push({ id: rmId(), name: v.name.trim(), color: v.color || '#1F3864', groups: [{ id: rmId(), name: '', lanes: [] }] }); persistRoadmap(); renderRoadmap(); }); }
 function rmEditSection(sid) { const s = rmFindSection(sid); if (!s) return; uiModal('Edit section', [{ id: 'name', label: 'Section heading', value: s.name }, { id: 'color', label: 'Colour', type: 'color', value: s.color || '#1F3864' }], 'Save', v => { s.name = v.name.trim(); if (v.color) s.color = v.color; persistRoadmap(); renderRoadmap(); }); }
 function rmDelSection(sid) { uiConfirm('Delete section', 'Delete this section and everything in it?', () => { roadmap.sections = roadmap.sections.filter(s => s.id !== sid); persistRoadmap(); renderRoadmap(); }); }
@@ -5386,6 +5458,7 @@ function renderRoadmap() {
         <div style="font-size:12px;color:#64748B;margin-top:2px">Nested swimlanes · ${roadmap.sections.length} sections · ${ORG}</div></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-ghost btn-sm" onclick="rmAddSection()" style="font-size:11px">＋ Section</button>
+        ${isGenesis() ? `<button class="btn btn-ghost btn-sm" onclick="rmSeedCRs()" style="font-size:11px" title="Add the CR delivery plan as a track (Design·DCUT·ST·SIT per CR)">＋ Load CR plan</button>` : ''}
         <button class="btn btn-ghost btn-sm" onclick="rmOpenMilestone(0)" style="font-size:11px">⚑ Milestone</button>
         <button class="btn btn-ghost btn-sm" onclick="rmPrint()" style="font-size:11px">🖨 Print / PDF</button>
       </div>

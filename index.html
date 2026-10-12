@@ -4001,18 +4001,18 @@ function genDashboardHTML() {
   const varE = T.aEl - T.fEl, varPct = T.fEl > 0 ? varE / T.fEl * 100 : 0;
   const activeCount = resUniq(rows.filter(r => r.active !== false));
   const totalUniq = resUniq(rows);
-  const kpi = (l, v, s, c) => `<div style="background:#fff;border:1px solid #EEF1F6;border-radius:14px;padding:16px 18px;flex:1;min-width:150px;box-shadow:0 1px 2px rgba(15,37,68,.04)"><div style="font-size:10.5px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:.6px">${l}</div><div style="font-size:26px;font-weight:800;color:${c || '#0F2544'};margin-top:6px;letter-spacing:-.01em">${v}</div><div style="font-size:11px;color:#64748B;margin-top:5px">${s}</div></div>`;
+  const kpi = (l, v, s, c, hrs) => `<div style="background:#fff;border:1px solid #EEF1F6;border-radius:14px;padding:16px 18px;flex:1;min-width:150px;box-shadow:0 1px 2px rgba(15,37,68,.04)"><div style="font-size:10.5px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:.6px">${l}</div><div style="font-size:26px;font-weight:800;color:${c || '#0F2544'};margin-top:6px;letter-spacing:-.01em">${v}</div>${hrs != null ? `<div style="font-size:11px;font-weight:600;color:#94A3B8;margin-top:1px">${fmt(Math.round(hrs))} hrs</div>` : ''}<div style="font-size:11px;color:#64748B;margin-top:5px">${s}</div></div>`;
   const monthly = mk.map(mo => { let f = 0, a = 0; rows.forEach(r => { if (resFcInMonth(r, mo.key)) f += +((r.forecast || {})[mo.key] || 0); if (resAcInMonth(r, mo.key)) a += +((r.actual || {})[mo.key] || 0); }); return { mo, f, a }; });
   const maxV = Math.max(1, ...monthly.map(m => Math.max(m.f, m.a)));
   const bars = `<div style="display:flex;align-items:flex-end;gap:8px;height:170px;padding-top:6px">${monthly.map(m => { const fh = Math.round(m.f / maxV * 150), ah = Math.round(m.a / maxV * 150); return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:5px"><div style="display:flex;align-items:flex-end;gap:3px;height:152px"><div title="forecast ${fmt(m.f)} md" style="width:14px;height:${fh}px;background:#CBD5E1;border-radius:3px 3px 0 0"></div>${m.a > 0 ? `<div title="actual ${fmt(m.a)} md" style="width:14px;height:${ah}px;background:#2563EB;border-radius:3px 3px 0 0"></div>` : ''}</div><div style="font-size:10px;color:#94A3B8">${m.mo.label}</div></div>`; }).join('')}</div>`;
   return `
     <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:18px"><div><div style="font-size:20px;font-weight:800;color:#0F2544">Genesis — Programme Dashboard</div><div style="font-size:12px;color:#64748B;margin-top:2px">Resourcing forecast vs actual &amp; resource pool by domain</div></div><input id="resSearchInput" value="${resSearch.replace(/"/g, '&quot;')}" oninput="resSetSearch(this.value)" placeholder="🔍 Search name…" style="padding:6px 10px;border:1px solid #E2E8F0;border-radius:8px;font-size:12px;min-width:160px"></div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px">
-      ${kpi('Forecast (total) <span onclick="genKpiInfo()" title="What is included and how it is calculated" style="cursor:pointer;color:#2563EB;font-weight:800;font-size:12px">&#9432;</span>', fmt(T.fTot), carveFC > 0 ? 'excl. CRM · + ' + fmt(carveFC) + ' CRM (separate) = ' + fmt(T.fTot + carveFC) + ' all-in' : 'man-days in window', '#0F2544')}
-      ${kpi('Actual to date', fmt(T.aEl), 'of ' + fmt(T.fEl) + ' planned (elapsed)', '#2563EB')}
+      ${kpi('Forecast (total) <span onclick="genKpiInfo()" title="What is included and how it is calculated" style="cursor:pointer;color:#2563EB;font-weight:800;font-size:12px">&#9432;</span>', fmt(T.fTot), carveFC > 0 ? 'excl. CRM · + ' + fmt(carveFC) + ' CRM (separate) = ' + fmt(T.fTot + carveFC) + ' all-in' : 'man-days in window', '#0F2544', T.fTot * 7.5)}
+      ${kpi('Actual to date', fmt(T.aEl), 'of ' + fmt(T.fEl) + ' planned (elapsed)', '#2563EB', T.aEl * 7.5)}
       ${kpi('Variance to date', (varPct > 0 ? '+' : '') + varPct.toFixed(1) + '%', Math.round(varE) + ' md vs plan', Math.abs(varPct) < 5 ? '#0F2544' : varPct > 0 ? '#B45309' : '#0F766E')}
-      ${kpi('Estimate to complete', fmt(etcTot), (etc21 + etc22 > 0 ? 'R2.1 ' + fmt(etc21) + ' · R2.2 ' + fmt(etc22) : 'man-days remaining'), '#0F2544')}
-      ${kpi('Est. at completion <span onclick="genKpiInfo()" title="What is included and how it is calculated" style="cursor:pointer;color:#2563EB;font-weight:800;font-size:12px">&#9432;</span>', fmt(T.aEl + etcTot), Math.round(T.aEl + etcTot - T.fTot) + ' vs baseline ' + fmt(T.fTot), (T.aEl + etcTot) > T.fTot * 1.02 ? '#B45309' : '#0F766E')}
+      ${kpi('Estimate to complete', fmt(etcTot), (etc21 + etc22 > 0 ? 'R2.1 ' + fmt(etc21) + ' · R2.2 ' + fmt(etc22) : 'man-days remaining'), '#0F2544', etcTot * 7.5)}
+      ${kpi('Est. at completion <span onclick="genKpiInfo()" title="What is included and how it is calculated" style="cursor:pointer;color:#2563EB;font-weight:800;font-size:12px">&#9432;</span>', fmt(T.aEl + etcTot), Math.round(T.aEl + etcTot - T.fTot) + ' vs baseline ' + fmt(T.fTot), (T.aEl + etcTot) > T.fTot * 1.02 ? '#B45309' : '#0F766E', (T.aEl + etcTot) * 7.5)}
       ${kpi('Active resources', activeCount, 'of ' + totalUniq + ' total', '#0F2544')}
       ${(() => { const ai = genAiStats(); const bits = Object.keys(ai.byRel).filter(r => ai.byRel[r].md > 0).map(r => `${r.replace(/^R/, '')} ${ai.pct(ai.byRel[r].md, ai.byRel[r].adj)}%`).join(' · '); return kpi('AI adoption', ai.overall + '%', bits ? 'by release: ' + bits : 'set AI % per segment in Scope', '#7C3AED'); })()}
     </div>
@@ -4713,7 +4713,7 @@ function renderResourcingView() {
   const T = resTotals(rows);
   const fmt = n => Math.round(n).toLocaleString();
   const varE = T.aEl - T.fEl, varPct = T.fEl > 0 ? varE / T.fEl * 100 : 0;
-  const kpi = (l, v, s, c) => `<div style="background:#fff;border:1px solid #EEF1F6;border-radius:14px;padding:16px 18px;flex:1;min-width:150px;box-shadow:0 1px 2px rgba(15,37,68,.04)"><div style="font-size:10.5px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:.6px">${l}</div><div style="font-size:26px;font-weight:800;color:${c || '#0F2544'};margin-top:6px;letter-spacing:-.01em">${v}</div><div style="font-size:11px;color:#64748B;margin-top:5px">${s}</div></div>`;
+  const kpi = (l, v, s, c, hrs) => `<div style="background:#fff;border:1px solid #EEF1F6;border-radius:14px;padding:16px 18px;flex:1;min-width:150px;box-shadow:0 1px 2px rgba(15,37,68,.04)"><div style="font-size:10.5px;font-weight:700;color:#94A3B8;text-transform:uppercase;letter-spacing:.6px">${l}</div><div style="font-size:26px;font-weight:800;color:${c || '#0F2544'};margin-top:6px;letter-spacing:-.01em">${v}</div>${hrs != null ? `<div style="font-size:11px;font-weight:600;color:#94A3B8;margin-top:1px">${fmt(Math.round(hrs))} hrs</div>` : ''}<div style="font-size:11px;color:#64748B;margin-top:5px">${s}</div></div>`;
 
   const monthly = T.mk.map(mo => { let f = 0, a = 0; rows.forEach(r => { if (resFcInMonth(r, mo.key)) f += +((r.forecast || {})[mo.key] || 0); if (resAcInMonth(r, mo.key)) a += +((r.actual || {})[mo.key] || 0); }); return { mo, f, a }; });
   const maxV = Math.max(1, ...monthly.map(x => Math.max(x.f, x.a)));
@@ -4820,11 +4820,11 @@ function renderResourcingView() {
       </div>
     </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:22px">
-      ${kpi('Forecast (total)', fmt(T.fTot), 'man-days in window', '#0F2544')}
-      ${kpi('Actual to date', fmt(T.aEl), 'of ' + fmt(T.fEl) + ' planned (elapsed)', '#2563EB')}
+      ${kpi('Forecast (total)', fmt(T.fTot), 'man-days in window', '#0F2544', T.fTot * 7.5)}
+      ${kpi('Actual to date', fmt(T.aEl), 'of ' + fmt(T.fEl) + ' planned (elapsed)', '#2563EB', T.aEl * 7.5)}
       ${kpi('Variance to date', (varPct > 0 ? '+' : '') + varPct.toFixed(1) + '%', Math.round(varE) + ' md vs plan', Math.abs(varPct) < 5 ? '#0F2544' : varPct > 0 ? '#B45309' : '#0F766E')}
-      ${kpi('Estimate to complete', fmt(etcTot), 'man-days remaining to finish', '#0F2544')}
-      ${kpi('Est. at completion', fmt(T.aEl + etcTot), (T.aEl + etcTot - T.fTot >= 0 ? '+' : '') + Math.round(T.aEl + etcTot - T.fTot) + ' vs baseline ' + fmt(T.fTot), (T.aEl + etcTot) > T.fTot * 1.02 ? '#B45309' : '#0F766E')}
+      ${kpi('Estimate to complete', fmt(etcTot), 'man-days remaining to finish', '#0F2544', etcTot * 7.5)}
+      ${kpi('Est. at completion', fmt(T.aEl + etcTot), (T.aEl + etcTot - T.fTot >= 0 ? '+' : '') + Math.round(T.aEl + etcTot - T.fTot) + ' vs baseline ' + fmt(T.fTot), (T.aEl + etcTot) > T.fTot * 1.02 ? '#B45309' : '#0F766E', (T.aEl + etcTot) * 7.5)}
       ${kpi('Active resources', activeCount, 'of ' + totalUniq + ' total' + (totalUniq - activeCount ? ' · ' + (totalUniq - activeCount) + ' inactive' : ''), '#0F2544')}
     </div>
     <div class="res-card" style="border-radius:14px"><div class="res-card-title" onclick="resToggleSec('bars')" style="cursor:pointer">${resSecChevron('bars')}Forecast vs Actual by month

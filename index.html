@@ -925,6 +925,26 @@ migrateProjects();
 
 let nextProjId  = Math.max(...projects.map(p=>p.id), 18) + 1;
 let nextPhaseId = 9000;
+
+/** Phase IDs used to restart at 9000 on every page load, so phases added in
+ *  different sessions could share an ID. Reorder/edit then acted on the first
+ *  phase with that ID, leaving the later one "stuck". This repairs any
+ *  duplicates within a project and moves the counter past every existing ID. */
+function repairPhaseIds() {
+  let maxId = 9000;
+  projects.forEach(p => (p.phases || []).forEach(ph => { if (+ph.id > maxId) maxId = +ph.id; }));
+  let changed = false;
+  projects.forEach(p => {
+    const seen = new Set();
+    (p.phases || []).forEach(ph => {
+      if (ph.id == null || seen.has(ph.id)) { ph.id = ++maxId; changed = true; }
+      seen.add(ph.id);
+    });
+  });
+  nextPhaseId = maxId + 1;
+  return changed;
+}
+if (repairPhaseIds()) localStorage.setItem(KP + 'projs', JSON.stringify(projects));
 let viewMode  = 'stream';
 const expanded = new Set(); // project IDs that are expanded to show phases
 
@@ -2419,6 +2439,7 @@ function applyCloudData(data) {
     }
   }
   migrateProjects();
+  repairPhaseIds();
   nextProjId = Math.max(...projects.map(p => p.id), 18) + 1;
   localStorage.setItem(KP + 'projs', JSON.stringify(projects));
 }

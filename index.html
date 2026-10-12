@@ -310,7 +310,8 @@ body.drag-active *{cursor:grabbing!important;user-select:none;}
     </div>
     <button class="btn btn-ghost" id="shareBtn" onclick="copyShareUrl(false)" title="Copy shareable link">🔗 Share</button>
     <button class="btn btn-ghost" onclick="openCloudModal()" title="Set up cloud sync so your team can collaborate">☁ Cloud Sync</button>
-    <button class="btn btn-ghost" onclick="exportJSON()">Export JSON</button>
+    <button class="btn btn-ghost" onclick="exportJSON()" title="Download a full backup of the whole workspace (projects, resourcing/forecast, roadmap, scope, governance)">Export JSON</button>
+    <button class="btn btn-ghost" onclick="importJSON()" title="Restore the whole workspace from a previously exported JSON file">Import JSON</button>
     <button class="btn btn-primary" onclick="openModal()">+ Add Project</button>
   </div>
 </div>
@@ -1680,9 +1681,50 @@ function deletePhase() {
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 function exportJSON() {
-  const blob = new Blob([JSON.stringify(projects,null,2)],{type:'application/json'});
+  // Full-state backup: projects + workOrders + resourcing/forecast + roadmap + scope + governance + sizing.
+  const payload = (typeof cloudPayload === 'function')
+    ? cloudPayload()
+    : { v: 2, projects };
+  const blob = new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
   const a = document.createElement('a'); a.href=URL.createObjectURL(blob);
-  a.download='aar_programs_of_work_2026.json'; a.click();
+  const d = new Date().toISOString().slice(0,10);
+  a.download = `${(typeof ORG!=='undefined'?ORG:'AAR')}_workspace_backup_${d}.json`; a.click();
+}
+
+/** Restore the whole workspace from a previously exported JSON file. */
+function importJSON() {
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.json,application/json';
+  inp.onchange = e => {
+    const file = e.target.files[0]; if (!file) return;
+    const rd = new FileReader();
+    rd.onload = ev => {
+      let data;
+      try { data = JSON.parse(ev.target.result); }
+      catch (err) { alert('That file is not valid JSON: ' + err.message); return; }
+      const isObj = data && typeof data === 'object';
+      const counts = Array.isArray(data)
+        ? `${data.length} projects (legacy format)`
+        : `${(data.projects||[]).length} projects · ${((data.resourcing||{}).rows||[]).length} resourcing rows · ${((data.governance||{}).crs||[]).length} CRs`;
+      if (!window.confirm(
+        'Import this backup and REPLACE the current workspace?\n\n' + counts +
+        '\n\nYour current data will be overwritten' +
+        ((typeof masterKey!=='undefined' && masterKey && !cloudReadOnly) ? ' and saved up to the shared cloud workspace.' : '.') +
+        '\n\nTip: Export first if you want a copy of what you have now.'
+      )) return;
+      try {
+        applyCloudData(data);
+        // Refresh everything on screen
+        if (typeof rebuildHorizon === 'function') rebuildHorizon();
+        renderStats(); render();
+        if (typeof refreshActiveViews === 'function') refreshActiveViews();
+        // If connected as an editor, push the restored data up to the gist
+        if (typeof masterKey!=='undefined' && masterKey && !cloudReadOnly && typeof pushCloud === 'function') pushCloud();
+        alert('Import complete — your workspace has been restored.');
+      } catch (err) { alert('Import failed while applying data: ' + err.message); }
+    };
+    rd.readAsText(file);
+  };
+  inp.click();
 }
 
 // ─── Resource View ────────────────────────────────────────────────────────────

@@ -490,7 +490,7 @@ body.drag-active *{cursor:grabbing!important;user-select:none;}
       <div id="cloudActivePanel" style="display:none">
         <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:8px;padding:14px;margin-bottom:16px">
           <div style="font-size:13px;font-weight:700;color:#16A34A;margin-bottom:4px">✓ Cloud sync is active</div>
-          <div style="font-size:12px;color:#374151;line-height:1.6">This <strong>token-less link</strong> is safe to share — it contains no credential. Send the <strong>token separately</strong> only to people who should <strong>edit</strong>; they paste it once. Whether others can <strong>view without a token</strong> depends on the workspace being public (below).</div>
+          <div style="font-size:12px;color:#374151;line-height:1.6"><strong>Anyone with this link can view the live plan</strong> (read-only) — no token needed. The <strong>token is only for editing</strong>: send it separately, to editors only. The link is <strong>unlisted</strong> (not searchable), so treat it as internal and don't post it publicly.</div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
           <input id="shareUrlInput" class="fi" type="text" readonly style="flex:1;font-size:11px;background:#F8FAFC;color:#374151;cursor:text">
@@ -502,7 +502,7 @@ body.drag-active *{cursor:grabbing!important;user-select:none;}
 
       <!-- Setup state: first-time configuration -->
       <div id="cloudSetupPanel">
-        <div id="cloudJoinNote" style="display:none;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#1E3A8A;line-height:1.6">You've opened a <strong>shared workspace link</strong>. To view/edit, paste the <strong>token</strong> a key member gave you (it's stored only on this device, never in the link).</div>
+        <div id="cloudJoinNote" style="display:none;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#1E3A8A;line-height:1.6">You've opened a <strong>shared workspace link</strong>. It should load <strong>read-only</strong> automatically — no token needed just to view. To <strong>edit</strong>, paste the <strong>token</strong> a key member gave you (stored only on this device, never in the link).</div>
         <p style="font-size:13px;color:#374151;margin-bottom:14px;line-height:1.6">
           Enable cloud sync so your whole team views and edits the same live data.
           Your data is stored in a <strong>GitHub Gist</strong> — it lives in your own GitHub account, is version-controlled, and never touches a third-party server.
@@ -2492,9 +2492,14 @@ async function initCloud() {
         const res = await cloudFetch({ type: urlCfg.type || 'gist', id: urlCfg.id, secret: null });
         applyCloudData(res.data); lastSyncVersion = res.version;
         binId = urlCfg.id; masterKey = null; backendType = urlCfg.type || 'gist'; cloudReadOnly = true;
-        setSyncBadge('ready', '👁 View only — no token (read-only)');
+        setSyncBadge('ready', '👁 View only (read-only)');
         renderStats(); render(); return;
-      } catch (e) { /* private gist or 404 → needs a token to view */ }
+      } catch (e) {
+        // Link opened but the workspace couldn't be read anonymously (needs a token, or gist not found)
+        pendingGistId = urlCfg.id;
+        setSyncBadge('error', '🔒 Token needed — ask an editor');
+        renderStats(); render(); return;
+      }
     }
     setSyncBadge('local'); renderStats(); render(); return;
   }
@@ -2544,8 +2549,8 @@ function openCloudModal() {
   if (hasCfg) document.getElementById('shareUrlInput').value = window.location.href;
   const vis = document.getElementById('cloudVisRow');
   if (vis && hasCfg) vis.innerHTML = cloudReadOnly
-    ? '👁 You are <strong>viewing</strong> this workspace (no token) — read-only.'
-    : '🔒 This workspace is <strong>private</strong>: people need the <strong>token</strong> to view or edit. To let others <strong>view without a token</strong>, the workspace would need to be a <strong>public</strong> gist (anyone with the link could read it) — usually not advisable for internal data; prefer sending an <strong>Export</strong> to viewers.';
+    ? '👁 You are <strong>viewing</strong> this workspace (read-only). Ask an editor for the <strong>token</strong> if you need to make changes.'
+    : '🔗 <strong>Anyone with the link can view</strong> the live plan (read-only). The <strong>token</strong> is only needed to <strong>edit</strong> — share it with editors only. The link is unlisted (not searchable); keep it internal.';
   document.getElementById('moCloud').classList.add('open');
 }
 

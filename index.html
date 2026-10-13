@@ -115,6 +115,7 @@ body.drag-active *{cursor:grabbing!important;user-select:none;}
 .g-row.proj-reorder-drag{opacity:.4}
 .g-row.proj-drop-above{box-shadow:inset 0 2px 0 #0D9488}
 .g-row.proj-drop-below{box-shadow:inset 0 -2px 0 #0D9488}
+.g-pdate{position:absolute;font-size:9px;font-weight:600;color:#64748B;white-space:nowrap;pointer-events:none;display:flex;align-items:center}
 .g-pbar-lbl{font-size:8px;color:#fff;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .g-pbar-tbd{background:transparent!important;border-style:dashed;border-width:1.5px;top:8px;height:15px}
 
@@ -1041,6 +1042,12 @@ function pct(dateStr) {
   return Math.max(0, Math.min(100, diff / GTOTAL * 100));
 }
 function fmtDate(d) { return d ? d.slice(0,7).replace('-','/') : 'TBD'; }
+function fmtDay(d) {
+  if (!d) return '';
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const [y, m, day] = d.split('-');
+  return `${+day} ${M[+m - 1]}${y !== String(new Date().getFullYear()) ? ' ' + y.slice(2) : ''}`;
+}
 
 // ─── Planned / Actual mode ───────────────────────────────────────────────────
 //   dataMode swaps which set of fields the whole app reads: planned (startDate,
@@ -1164,6 +1171,10 @@ function phaseBarHtml(ph, projId) {
       onmousedown="startPhaseDrag(event,this,${projId},${ph.id})">
       <span class="g-pbar-lbl">${ph.name}${pResStr}</span>
     </div>`;
+    if (!isGenesis()) {
+      bar += `<div class="g-pdate g-pdate-s" style="right:calc(${(100 - x1).toFixed(2)}% + 5px);top:${pTop}px;height:${pH}px">${fmtDay(ph.startDate)}</div>`
+           + `<div class="g-pdate g-pdate-e" style="left:calc(${(x1 + w).toFixed(2)}% + 5px);top:${pTop}px;height:${pH}px">${fmtDay(ph.endDate)}</div>`;
+    }
   }
 
   // ── Actual bar — secondary, stacked below the forecast when actuals recorded ──
@@ -3392,6 +3403,10 @@ document.addEventListener('mousemove', e => {
   const w  = Math.max(0.4, x2 - x1);
   phaseDragState.barEl.style.left  = `${x1.toFixed(2)}%`;
   phaseDragState.barEl.style.width = `${w.toFixed(2)}%`;
+  const dArea = phaseDragState.barEl.parentElement;
+  const dS = dArea && dArea.querySelector('.g-pdate-s'), dE = dArea && dArea.querySelector('.g-pdate-e');
+  if (dS) { dS.style.right = `calc(${(100 - x1).toFixed(2)}% + 5px)`; dS.textContent = fmtDay(ph.startDate); }
+  if (dE) { dE.style.left = `calc(${(x1 + w).toFixed(2)}% + 5px)`; dE.textContent = fmtDay(ph.endDate); }
 
   // Live-update the levelling view if open (throttled to ~30fps)
   const now = Date.now();
